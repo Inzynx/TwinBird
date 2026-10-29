@@ -3,11 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from twinbird.platform import (
+    InvalidInstanceName,
     PlatformConfig,
     derive_daemon_addr,
     derive_interface_name,
     get_platform_config,
+    resolve_interface_name,
+    validate_instance_name,
 )
 
 
@@ -54,8 +59,29 @@ class TestGetPlatformConfig:
             assert config.config_root == Path("/custom/path")
 
 
+def test_linux_managed_state_is_separate(tmp_path: Path) -> None:
+    from twinbird.platform import managed_child_env
+
+    instance = tmp_path / "office"
+    with (
+        patch("twinbird.platform.sys.platform", "linux"),
+        patch.dict(
+            "os.environ",
+            {
+                "NB_STATE_DIR": "/var/lib/netbird",
+                "TWINBIRD_SETUP_KEY": "test-secret",
+            },
+        ),
+    ):
+        env = managed_child_env(instance)
+    assert env["NB_STATE_DIR"] == str(instance.resolve())
+    assert "TWINBIRD_SETUP_KEY" not in env
+
+
 class TestDeriveDaemonAddr:
-    def test_windows_tcp(self) -> None:
+    def test_windows_loopback_tcp(self) -> None:
+        # The NetBird agent only supports [unix|tcp]:// for --daemon-addr (no
+        # named pipes), so Windows uses a loopback TCP port, never 41731 (stock).
         config = PlatformConfig(
             config_root=Path("C:/Users/user/AppData/twinbird"),
             interface_prefix="wt",
@@ -63,8 +89,9 @@ class TestDeriveDaemonAddr:
         with patch("twinbird.platform.sys.platform", "win32"):
             addr = derive_daemon_addr("office", config)
             assert addr.startswith("tcp://127.0.0.1:")
-            port = int(addr.split(":")[-1])
-            assert 52160 <= port <= 52959
+            port = int(addr.rsplit(":", 1)[1])
+            assert 42000 <= port <= 42999
+            assert port != 41731
 
     def test_deterministic(self) -> None:
         config = PlatformConfig(
@@ -138,3 +165,111 @@ class TestDeriveInterfaceName:
         assert derive_interface_name("office", config) != derive_interface_name(
             "home", config
         )
+
+
+class TestValidateInstanceName:
+    def test_accepts_simple(self) -> None:
+        assert validate_instance_name("office") == "office"
+        assert validate_instance_name("work-01") == "work-01"
+        assert validate_instance_name("a_b-9") == "a_b-9"
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",
+            "..",
+            "../evil",
+            "a/b",
+            "a\b",
+            "has space",
+            "semi;colon",
+            "quote'inject",
+            "$(whoami)",
+            "name\nnewline",
+            "-leadingdash",
+            "a" * 65,
+            "con",
+            "LPT1",
+            "nul",
+        ],
+    )
+    def test_rejects_bad(self, bad: str) -> None:
+        with pytest.raises(InvalidInstanceName):
+            validate_instance_name(bad)
+
+
+class TestResolveInterfaceName:
+    def test_matches_derive_when_free(self) -> None:
+        config = PlatformConfig(config_root=Path("/tmp"), interface_prefix="wt")
+        assert resolve_interface_name("office", config, set()) == derive_interface_name(
+            "office", config
+        )
+
+    def test_avoids_taken(self) -> None:
+        config = PlatformConfig(config_root=Path("/tmp"), interface_prefix="wt")
+        first = derive_interface_name("office", config)
+        resolved = resolve_interface_name("office", config, {first})
+        assert resolved != first
+        assert resolved.startswith("wt")
+
+    def test_falls_back_when_all_taken(self) -> None:
+        config = PlatformConfig(config_root=Path("/tmp"), interface_prefix="wt")
+        taken = {f"wt{i}" for i in range(1, 100)}
+        resolved = resolve_interface_name("office", config, taken)
+        assert resolved == derive_interface_name("office", config)
+
+
+class TestResolveWireguardPort:
+    def test_deterministic_and_in_range(self) -> None:
+        from twinbird.platform import derive_wireguard_port
+
+        p = derive_wireguard_port("office")
+        assert 51821 <= p <= 52820
+        assert derive_wireguard_port("office") == p
+
+    def test_avoids_default_and_taken(self) -> None:
+        from twinbird.platform import (
+            NETBIRD_DEFAULT_WG_PORT,
+            derive_wireguard_port,
+            resolve_wireguard_port,
+        )
+
+        first = derive_wireguard_port("office")
+        resolved = resolve_wireguard_port("office", {first})
+        assert resolved != first
+        assert resolved != NETBIRD_DEFAULT_WG_PORT
+
+    def test_never_returns_primary_default(self) -> None:
+        from twinbird.platform import NETBIRD_DEFAULT_WG_PORT, resolve_wireguard_port
+
+        # Even if every other port were taken, 51820 must never be handed out.
+        got = resolve_wireguard_port("x", set())
+        assert got != NETBIRD_DEFAULT_WG_PORT
+
+
+class TestResolveControlPort:
+    def test_in_range_and_avoids_default(self) -> None:
+        from twinbird.platform import (
+            NETBIRD_DEFAULT_DAEMON_PORT,
+            derive_control_port,
+            resolve_control_port,
+        )
+
+        p = derive_control_port("office")
+        assert 42000 <= p <= 42999
+        assert resolve_control_port("office", {p}) != p
+        assert resolve_control_port("x", set()) != NETBIRD_DEFAULT_DAEMON_PORT
+
+
+class TestDefaultPrimaryDaemonAddr:
+    def test_windows_tcp_41731(self) -> None:
+        from twinbird.platform import default_primary_daemon_addr
+
+        with patch("twinbird.platform.sys.platform", "win32"):
+            assert default_primary_daemon_addr() == "tcp://127.0.0.1:41731"
+
+    def test_posix_unix_socket(self) -> None:
+        from twinbird.platform import default_primary_daemon_addr
+
+        with patch("twinbird.platform.sys.platform", "linux"):
+            assert default_primary_daemon_addr() == "unix:///var/run/netbird.sock"

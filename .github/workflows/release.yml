@@ -5,13 +5,15 @@ on:
     tags:
       - "v*"
 
+# Least privilege by default; each job opts into exactly what it needs.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +32,8 @@ jobs:
   github-release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub Release and upload assets
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +53,8 @@ jobs:
     needs: github-release
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      id-token: write  # OIDC trusted publishing to PyPI
 
     steps:
       - name: Download artifacts

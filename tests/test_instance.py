@@ -24,20 +24,20 @@ class TestUp:
         platform = _mock_platform(tmp_path)
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.start_daemon", return_value=42),
-            patch("twinbird.instance.read_pid", return_value=None),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.start_daemon", return_value=42),
+            patch("twinbird.manager.read_pid", return_value=None),
             patch(
-                "twinbird.instance.run_up",
+                "twinbird.manager.run_up",
                 return_value=MagicMock(returncode=0, stdout="Connected"),
             ),
             patch(
-                "twinbird.instance.derive_daemon_addr",
+                "twinbird.manager.derive_daemon_addr",
                 return_value="tcp://127.0.0.1:52200",
             ),
-            patch("twinbird.instance.derive_interface_name", return_value="wt7"),
-            patch("twinbird.instance.register_service"),
+            patch("twinbird.manager.resolve_interface_name", return_value="wt7"),
+            patch("twinbird.manager.register_service"),
         ):
             up(
                 name="office",
@@ -62,11 +62,11 @@ class TestUp:
         write_metadata(tmp_path, meta)
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.read_pid", return_value=42),
-            patch("twinbird.instance.is_service_registered", return_value=True),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.read_pid", return_value=42),
+            patch("twinbird.manager.is_service_registered", return_value=True),
         ):
             up(
                 name="office",
@@ -92,12 +92,12 @@ class TestUp:
         mock_register = MagicMock()
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.read_pid", return_value=42),
-            patch("twinbird.instance.is_service_registered", return_value=False),
-            patch("twinbird.instance.register_service", mock_register),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.read_pid", return_value=42),
+            patch("twinbird.manager.is_service_registered", return_value=False),
+            patch("twinbird.manager.register_service", mock_register),
         ):
             up(
                 name="office",
@@ -119,20 +119,21 @@ class TestUp:
         mock_register = MagicMock()
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.start_daemon", return_value=42),
-            patch("twinbird.instance.read_pid", return_value=None),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.start_daemon", return_value=42),
+            patch("twinbird.manager.read_pid", return_value=None),
             patch(
-                "twinbird.instance.run_up",
+                "twinbird.manager.run_up",
                 return_value=MagicMock(returncode=0, stdout="Connected"),
             ),
             patch(
-                "twinbird.instance.derive_daemon_addr",
+                "twinbird.manager.derive_daemon_addr",
                 return_value="tcp://127.0.0.1:52200",
             ),
-            patch("twinbird.instance.derive_interface_name", return_value="wt7"),
-            patch("twinbird.instance.register_service", mock_register),
+            patch("twinbird.manager.resolve_control_port", return_value=52200),
+            patch("twinbird.manager.resolve_interface_name", return_value="wt7"),
+            patch("twinbird.manager.register_service", mock_register),
         ):
             up(
                 name="office",
@@ -166,13 +167,13 @@ class TestDown:
         write_pid(tmp_path, "office", 42)
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.read_pid", return_value=42),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.run_down", return_value=MagicMock(returncode=0)),
-            patch("twinbird.instance.stop_daemon"),
-            patch("twinbird.instance.unregister_service"),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.read_pid", return_value=42),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.run_down", return_value=MagicMock(returncode=0)),
+            patch("twinbird.manager.stop_daemon"),
+            patch("twinbird.manager.unregister_service"),
         ):
             down("office")
 
@@ -181,13 +182,13 @@ class TestDown:
 
         platform = _mock_platform(tmp_path)
 
-        import click
+        import typer
 
-        with patch("twinbird.instance.get_platform_config", return_value=platform):
+        with patch("twinbird.manager.get_platform_config", return_value=platform):
             try:
                 down("nonexistent")
-                raise AssertionError("Should have raised SystemExit")
-            except (SystemExit, click.exceptions.Exit):
+                raise AssertionError("Should have raised typer.Exit")
+            except (SystemExit, typer.Exit):
                 pass
 
     def test_unregisters_service_on_down(self, tmp_path: Path) -> None:
@@ -209,13 +210,13 @@ class TestDown:
         mock_unregister = MagicMock()
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.read_pid", return_value=42),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.run_down", return_value=MagicMock(returncode=0)),
-            patch("twinbird.instance.stop_daemon"),
-            patch("twinbird.instance.unregister_service", mock_unregister),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.read_pid", return_value=42),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.run_down", return_value=MagicMock(returncode=0)),
+            patch("twinbird.manager.stop_daemon"),
+            patch("twinbird.manager.unregister_service", mock_unregister),
         ):
             down("office")
 
@@ -240,11 +241,13 @@ class TestDown:
         mock_unregister = MagicMock()
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.find_netbird_bin", return_value="netbird"),
-            patch("twinbird.instance.read_pid", return_value=42),
-            patch("twinbird.instance.is_process_alive", return_value=False),
-            patch("twinbird.instance.unregister_service", mock_unregister),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch("twinbird.manager.read_pid", return_value=42),
+            patch("twinbird.manager.is_process_alive", return_value=False),
+            patch("twinbird.manager.is_daemon_reachable", return_value=False),
+            patch("twinbird.manager.stop_registered_service"),
+            patch("twinbird.manager.unregister_service", mock_unregister),
         ):
             down("office")
 
@@ -257,7 +260,7 @@ class TestListAll:
 
         platform = _mock_platform(tmp_path)
 
-        with patch("twinbird.instance.get_platform_config", return_value=platform):
+        with patch("twinbird.manager.get_platform_config", return_value=platform):
             list_all()
 
         captured = capsys.readouterr()
@@ -275,9 +278,9 @@ class TestListAll:
         write_pid(tmp_path, "office", 42)
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.is_service_registered", return_value=True),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.is_service_registered", return_value=True),
         ):
             list_all()
 
@@ -296,12 +299,40 @@ class TestListAll:
         write_pid(tmp_path, "office", 42)
 
         with (
-            patch("twinbird.instance.get_platform_config", return_value=platform),
-            patch("twinbird.instance.is_process_alive", return_value=True),
-            patch("twinbird.instance.is_service_registered", return_value=False),
+            patch("twinbird.manager.get_platform_config", return_value=platform),
+            patch("twinbird.manager.is_process_alive", return_value=True),
+            patch("twinbird.manager.is_service_registered", return_value=False),
         ):
             list_all()
 
         captured = capsys.readouterr()
         assert "office: running" in captured.out
         assert "persistent" not in captured.out
+
+
+class TestNameValidation:
+    def test_up_rejects_traversal(self, tmp_path: Path) -> None:
+        import typer
+
+        from twinbird.instance import up
+
+        platform = _mock_platform(tmp_path)
+        with patch("twinbird.manager.get_platform_config", return_value=platform):
+            try:
+                up(name="../evil", management_url="https://m.example.com")
+                raise AssertionError("should reject")
+            except (SystemExit, typer.Exit):
+                pass
+
+    def test_down_rejects_bad_name(self, tmp_path: Path) -> None:
+        import typer
+
+        from twinbird.instance import down
+
+        platform = _mock_platform(tmp_path)
+        with patch("twinbird.manager.get_platform_config", return_value=platform):
+            try:
+                down("a;rm -rf")
+                raise AssertionError("should reject")
+            except (SystemExit, typer.Exit):
+                pass

@@ -4,7 +4,53 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
+def test_linux_user_unit_preserves_instance_state(tmp_path: Path) -> None:
+    from twinbird.service import _register_linux
+
+    instance = tmp_path / "office"
+    with (
+        patch("twinbird.service.sys.platform", "linux"),
+        patch("twinbird.service._systemd_unit_dir", return_value=tmp_path),
+        patch("twinbird.service.subprocess.run", return_value=MagicMock(returncode=0)),
+    ):
+        _register_linux(
+            "office",
+            "netbird",
+            instance,
+            "unix:///tmp/office.sock",
+            instance / "daemon.log",
+        )
+    unit = (tmp_path / "twinbird-office.service").read_text()
+    assert "Environment=" in unit
+    assert "NB_STATE_DIR=" in unit
+    assert str(instance.resolve()) in unit
+    assert str(instance / "config.json") in unit
+
+
 class TestWindowsRegister:
+    def test_windows_task_uses_isolated_config_and_environment(
+        self, tmp_path: Path
+    ) -> None:
+        from twinbird.platform import managed_child_env
+        from twinbird.service import _build_netbird_cmd, _write_task_xml
+
+        instance = tmp_path / "office"
+        with (
+            patch("twinbird.service.sys.platform", "win32"),
+            patch("twinbird.service.tempfile.gettempdir", return_value=str(tmp_path)),
+        ):
+            env = managed_child_env(instance)
+            parts = _build_netbird_cmd(
+                "netbird", instance, "tcp://127.0.0.1:42001", instance / "daemon.log"
+            )
+            task = _write_task_xml(
+                "office", parts, {"NB_STATE_DIR": env["NB_STATE_DIR"]}
+            )
+        xml = task.read_text(encoding="utf-16")
+        assert str(instance / "Netbird" / "config.json") in xml
+        assert "$env:NB_STATE_DIR=" in xml
+        assert str(instance / "Netbird") in xml
+
     def test_creates_scheduled_task_directly(self, tmp_path: Path) -> None:
         from twinbird.service import register_service
 
@@ -305,6 +351,38 @@ class TestLinuxIsRegistered:
 
 
 class TestMacosRegister:
+    def test_isolates_state_and_does_not_start_duplicate_daemon(
+        self, tmp_path: Path
+    ) -> None:
+        import plistlib
+
+        from twinbird.service import register_service
+
+        config_dir = tmp_path / "office & home"
+        with (
+            patch("twinbird.service.sys.platform", "darwin"),
+            patch("twinbird.service.Path.home", return_value=tmp_path),
+            patch(
+                "twinbird.service.shutil.which",
+                return_value="/opt/homebrew/bin/netbird",
+            ),
+            patch("twinbird.service.is_daemon_reachable", return_value=True),
+            patch("twinbird.service.subprocess.run") as run,
+        ):
+            register_service(
+                name="office",
+                netbird_bin="netbird",
+                config_dir=config_dir,
+                daemon_addr="unix:///tmp/office.sock",
+                log_file=config_dir / "daemon.log",
+            )
+        plist = tmp_path / "Library" / "LaunchAgents" / "com.twinbird.office.plist"
+        data = plistlib.loads(plist.read_bytes())
+        assert data["EnvironmentVariables"]["NB_STATE_DIR"] == str(config_dir.resolve())
+        assert data["ProgramArguments"][0] == "/opt/homebrew/bin/netbird"
+        assert str(config_dir / "config.json") in data["ProgramArguments"]
+        run.assert_not_called()
+
     def test_writes_plist_and_loads(self, tmp_path: Path) -> None:
         from twinbird.service import register_service
 

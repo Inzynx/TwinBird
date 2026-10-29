@@ -3,16 +3,19 @@ name = "twinbird"
 version = "0.1.4"
 description = "Manage multiple NetBird instances with isolated configs, sockets, and interfaces"
 readme = "README.md"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
     { name = "OseSem", email = "sem@osesem.xyz" }
+]
+maintainers = [
+    { name = "inzynx" }
 ]
 keywords = ["netbird", "vpn", "wireguard", "multi-instance", "cli"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -25,13 +28,22 @@ dependencies = [
     "typer>=0.24.1",
 ]
 
+[project.optional-dependencies]
+# System-tray icon for `twinbird gui`. The window itself only needs tkinter
+# (standard library); these add the tray. Install with: pip install 'twinbird[gui]'
+gui = [
+    "pystray>=0.19.5",
+    "pillow>=10.0.0",
+]
+
 [project.scripts]
 twinbird = "twinbird.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/OseSem/twinbird"
-Repository = "https://github.com/OseSem/twinbird"
-Issues = "https://github.com/OseSem/twinbird/issues"
+Homepage = "https://github.com/Inzynx/TwinBird"
+Repository = "https://github.com/Inzynx/TwinBird"
+Issues = "https://github.com/Inzynx/TwinBird/issues"
+Upstream = "https://github.com/OseSem/twinbird"
 
 [build-system]
 requires = ["hatchling"]
@@ -40,12 +52,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/twinbird"]
 
+# Ship the bundled logo/icon with the wheel so the GUI can load it at runtime.
+[tool.hatch.build.targets.wheel.force-include]
+"src/twinbird/assets/logo.png" = "twinbird/assets/logo.png"
+"src/twinbird/assets/logo.ico" = "twinbird/assets/logo.ico"
+"src/twinbird/assets/logo-transparent.png" = "twinbird/assets/logo-transparent.png"
+"src/twinbird/assets/logo-transparent.ico" = "twinbird/assets/logo-transparent.ico"
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
     "pyright>=1.1.408",
     "pytest>=9.0.2",
     "ruff>=0.15.8",
+    # GUI extras so type-checking and the GUI tests run in CI too.
+    "pystray>=0.19.5",
+    "pillow>=10.0.0",
 ]
 
 [tool.pyright]

@@ -26,6 +26,10 @@ class TestUp:
         with (
             patch("twinbird.manager.get_platform_config", return_value=platform),
             patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_version",
+                return_value=MagicMock(returncode=0, stdout="0.0.0"),
+            ),
             patch("twinbird.manager.start_daemon", return_value=42),
             patch("twinbird.manager.read_pid", return_value=None),
             patch(
@@ -64,6 +68,10 @@ class TestUp:
         with (
             patch("twinbird.manager.get_platform_config", return_value=platform),
             patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_version",
+                return_value=MagicMock(returncode=0, stdout="0.0.0"),
+            ),
             patch("twinbird.manager.is_process_alive", return_value=True),
             patch("twinbird.manager.read_pid", return_value=42),
             patch("twinbird.manager.is_service_registered", return_value=True),
@@ -94,6 +102,10 @@ class TestUp:
         with (
             patch("twinbird.manager.get_platform_config", return_value=platform),
             patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_version",
+                return_value=MagicMock(returncode=0, stdout="0.0.0"),
+            ),
             patch("twinbird.manager.is_process_alive", return_value=True),
             patch("twinbird.manager.read_pid", return_value=42),
             patch("twinbird.manager.is_service_registered", return_value=False),
@@ -121,6 +133,10 @@ class TestUp:
         with (
             patch("twinbird.manager.get_platform_config", return_value=platform),
             patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_version",
+                return_value=MagicMock(returncode=0, stdout="0.0.0"),
+            ),
             patch("twinbird.manager.start_daemon", return_value=42),
             patch("twinbird.manager.read_pid", return_value=None),
             patch(

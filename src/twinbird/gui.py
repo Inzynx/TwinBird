@@ -24,11 +24,13 @@ import tempfile
 import threading
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 try:
     import tkinter as tk
-    from tkinter import messagebox, ttk
+    from tkinter import font as tkfont
+    from tkinter import messagebox, simpledialog, ttk
 except Exception as exc:  # pragma: no cover - platform without Tk
     raise RuntimeError(
         "The TwinBird GUI needs tkinter, which is not available in this Python. "
@@ -117,6 +119,18 @@ def _is_windows_admin() -> bool:
         return False
 
 
+def _enable_windows_dpi() -> None:
+    """Keep text and controls sharp on scaled Windows displays."""
+    if sys.platform != "win32":
+        return
+    with contextlib.suppress(Exception):
+        import ctypes
+
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+
+
 def _make_tray_image() -> Any:
     """Build the tray icon image (the bundled logo, else a drawn fallback)."""
     from PIL import Image, ImageDraw
@@ -171,6 +185,8 @@ class _AddDialog:
         self._build()
         self.top.protocol("WM_DELETE_WINDOW", self._cancel)
         self.top.bind("<Escape>", lambda _e: self._cancel())
+        self.top.bind("<Return>", lambda _e: self._ok())
+        self.top.bind("<KP_Enter>", lambda _e: self._ok())
         self.top.wait_window(self.top)
 
     def _field(
@@ -255,7 +271,7 @@ class _AddDialog:
 
         self.top.update_idletasks()
         self.top.minsize(self.top.winfo_reqwidth(), self.top.winfo_reqheight())
-        self.e_name.focus_set()
+        self.top.after_idle(self.e_name.focus_set)
 
     def _ok(self) -> None:
         name = self.e_name.get().strip()
@@ -333,6 +349,10 @@ _HELP_SECTIONS: list[tuple[str, str]] = [
         "to toggle).\n"
         "- Autostart: registers a startup entry; reconnect depends on platform "
         "permissions.\n"
+        "- Rename / F2: change the local display name without reconnecting. "
+        "The NetBird peer name and internal instance ID stay the same.\n"
+        "- Enter on a row: connect/disconnect. F5: refresh. Right-click: copy "
+        "the IP, peer name or connection details.\n"
         "- Remove: stop and delete a managed instance's local settings. "
         "The adopted primary cannot be removed. Delete any remote peer in the "
         "NetBird dashboard separately.",
@@ -395,10 +415,12 @@ _HELP_SECTIONS: list[tuple[str, str]] = [
 
 class TwinBirdApp:
     def __init__(self) -> None:
+        _enable_windows_dpi()
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("1040x650")
-        self.root.minsize(800, 520)
+        height = min(680, max(460, self.root.winfo_screenheight() - 120))
+        self.root.geometry(f"960x{height}")
+        self.root.minsize(640, 460)
         self._apply_theme()
 
         self._events: queue.Queue = queue.Queue()
@@ -412,6 +434,8 @@ class TwinBirdApp:
 
         self._apply_window_icon()
         self._build_ui()
+        self.root.bind_class("TButton", "<Return>", self._invoke_focused_button)
+        self.root.bind_class("TButton", "<KP_Enter>", self._invoke_focused_button)
         self.root.after(150, self._drain_events)
         self.refresh()
 
@@ -420,10 +444,58 @@ class TwinBirdApp:
     def _apply_theme(self) -> None:
         style = ttk.Style(self.root)
         with contextlib.suppress(Exception):
-            style.configure("Treeview", rowheight=32, font=("", 9))
-            style.configure("Treeview.Heading", font=("", 9, "bold"), padding=(8, 6))
-            style.configure("TButton", padding=(10, 5))
-            style.configure("Toolbutton", padding=(10, 5))
+            style.theme_use("clam")
+        family = "Segoe UI" if sys.platform == "win32" else "Helvetica"
+        tkfont.nametofont("TkDefaultFont").configure(family=family, size=9)
+        tkfont.nametofont("TkTextFont").configure(family=family, size=9)
+        tkfont.nametofont("TkFixedFont").configure(size=9)
+        self.root.configure(background="#f3f6fa")
+        style.configure(".", background="#f3f6fa", foreground="#1e293b")
+        style.configure("TFrame", background="#f3f6fa")
+        style.configure("TLabel", background="#f3f6fa", foreground="#1e293b")
+        style.configure("Muted.TLabel", foreground="#64748b")
+        style.configure("Title.TLabel", font=(family, 16, "bold"))
+        style.configure("TNotebook", borderwidth=0, tabmargins=(0, 4, 0, 0))
+        style.configure("TNotebook.Tab", padding=(9, 4), width=11, anchor="center")
+        # Clam's default selected-state padding makes a selected tab taller.
+        # Clear that map so both tab buttons retain identical dimensions.
+        style.map("TNotebook.Tab", padding=[], background=[("selected", "#ffffff")])
+        style.configure(
+            "Treeview",
+            rowheight=27,
+            font=(family, 9),
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            borderwidth=0,
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=(family, 9, "bold"),
+            background="#e8eef6",
+            padding=(6, 5),
+            relief="flat",
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", "#dbeafe")],
+            foreground=[("selected", "#143b71")],
+        )
+        style.configure("TButton", padding=(6, 3), width=0, background="#ffffff")
+        style.map(
+            "TButton",
+            foreground=[("disabled", "#94a3b8")],
+            background=[("active", "#e8eef6")],
+        )
+        style.configure("Accent.TButton", background="#2563eb", foreground="#ffffff")
+        style.map(
+            "Accent.TButton",
+            background=[("disabled", "#cbd5e1"), ("active", "#1d4ed8")],
+            foreground=[("disabled", "#64748b")],
+        )
+        style.configure("TLabelframe", bordercolor="#dbe3ee", borderwidth=1)
+        style.configure("TLabelframe.Label", font=(family, 9, "bold"))
+        style.configure("Vertical.TScrollbar", arrowsize=12, width=12)
+        style.configure("Horizontal.TScrollbar", arrowsize=12, width=12)
 
     # -- Branding ---------------------------------------------------------- #
 
@@ -468,9 +540,14 @@ class TwinBirdApp:
             self._build_admin_notice()
 
         notebook = ttk.Notebook(self.root)
+        self._notebook = notebook
         notebook.pack(fill="both", expand=True, padx=10, pady=(4, 0))
         self._tab_instances = ttk.Frame(notebook)
         self._tab_help = ttk.Frame(notebook)
+        # Keep either page's requested size from resizing the top-level window
+        # when selection changes. Both pages fill the same notebook area.
+        self._tab_instances.pack_propagate(False)
+        self._tab_help.pack_propagate(False)
         notebook.add(self._tab_instances, text="Instances")
         notebook.add(self._tab_help, text="Help")
 
@@ -478,8 +555,8 @@ class TwinBirdApp:
         self._build_help_tab(self._tab_help)
 
         self._status_var = tk.StringVar(value="Ready.")
-        status = ttk.Frame(self.root, relief="groove")
-        status.pack(fill="x", side="bottom")
+        status = ttk.Frame(self.root, padding=(8, 3))
+        status.pack(fill="x", side="bottom", before=notebook)
         ttk.Label(
             status, textvariable=self._status_var, anchor="w", padding=(8, 3)
         ).pack(side="left", fill="x", expand=True)
@@ -492,7 +569,7 @@ class TwinBirdApp:
         notice = ttk.Frame(self.root, padding=(12, 8))
         notice.pack(fill="x", padx=10, pady=(4, 2))
         notice.columnconfigure(0, weight=1)
-        ttk.Label(
+        self._admin_notice_label = ttk.Label(
             notice,
             text=(
                 "Administrator rights are required to create NetBird network "
@@ -502,7 +579,8 @@ class TwinBirdApp:
             foreground="#8a4b08",
             wraplength=700,
             justify="left",
-        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        )
+        self._admin_notice_label.grid(row=0, column=0, sticky="w", padx=(0, 12))
         ttk.Button(
             notice,
             text="Restart as administrator",
@@ -542,36 +620,52 @@ class TwinBirdApp:
         self.root.destroy()
 
     def _build_header(self) -> None:
-        header = ttk.Frame(self.root, padding=(12, 10, 12, 2))
+        header = ttk.Frame(self.root, padding=(12, 8, 12, 2))
         header.pack(fill="x")
-        logo = self._photo_image(subsample=4)  # ~64px from the 256px asset
+        logo = self._photo_image(subsample=8)  # ~32px from the 256px asset
         if logo is not None:
             ttk.Label(header, image=logo).pack(side="left", padx=(0, 10))
         text = ttk.Frame(header)
         text.pack(side="left", anchor="w")
-        ttk.Label(text, text=APP_TITLE, font=("", 15, "bold")).pack(anchor="w")
-        ttk.Label(text, text=APP_SUBTITLE, foreground="#666").pack(anchor="w")
+        ttk.Label(text, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
+        ttk.Label(text, text=APP_SUBTITLE, style="Muted.TLabel").pack(anchor="w")
         ttk.Label(header, text="EXPERIMENTAL", foreground="#8a4b08").pack(side="right")
 
     def _build_instances_tab(self, parent: ttk.Frame) -> None:
-        root = ttk.Frame(parent, padding=12)
+        root = ttk.Frame(parent, padding=8)
         root.pack(fill="both", expand=True)
 
-        toolbar = ttk.Frame(root, padding=(0, 0, 0, 10))
+        toolbar = ttk.Frame(root, padding=(0, 0, 0, 6))
         toolbar.pack(fill="x")
 
-        self._btn_add = ttk.Button(toolbar, text="Add instance", command=self._on_add)
+        self._btn_add = ttk.Button(
+            toolbar, text="Add instance", command=self._on_add, style="Accent.TButton"
+        )
         self._btn_add.pack(side="left")
         self._btn_scan = ttk.Button(
             toolbar, text="Scan for existing", command=self._on_scan
         )
         self._btn_scan.pack(side="left", padx=(6, 0))
+        self._details_visible = tk.BooleanVar(value=True)
+        self._log_visible = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            toolbar,
+            text="Details",
+            variable=self._details_visible,
+            command=self._update_panel_visibility,
+        ).pack(side="left", padx=(10, 0))
+        ttk.Checkbutton(
+            toolbar,
+            text="Log",
+            variable=self._log_visible,
+            command=self._update_panel_visibility,
+        ).pack(side="left", padx=(6, 0))
         self._btn_refresh = ttk.Button(
             toolbar, text="Refresh status", command=self.refresh
         )
         self._btn_refresh.pack(side="right")
 
-        actions = ttk.Frame(root, padding=(0, 0, 0, 8))
+        actions = ttk.Frame(root, padding=(0, 0, 0, 6))
         actions.pack(fill="x")
         self._btn_start = ttk.Button(actions, text="Start", command=self._on_start)
         self._btn_stop = ttk.Button(actions, text="Stop", command=self._on_stop)
@@ -579,7 +673,14 @@ class TwinBirdApp:
             actions, text="Enable autostart", command=self._on_toggle_autostart
         )
         self._btn_remove = ttk.Button(actions, text="Remove", command=self._on_remove)
-        for b in (self._btn_start, self._btn_stop, self._btn_auto, self._btn_remove):
+        self._btn_rename = ttk.Button(actions, text="Rename", command=self._on_rename)
+        for b in (
+            self._btn_start,
+            self._btn_stop,
+            self._btn_rename,
+            self._btn_auto,
+            self._btn_remove,
+        ):
             b.pack(side="left", padx=(0, 6))
         self._btn_cancel = ttk.Button(
             actions,
@@ -592,14 +693,14 @@ class TwinBirdApp:
         ttk.Label(
             root,
             text=(
-                "Status is checked on startup, after actions and when you refresh. "
-                "Your existing NetBird is protected from removal."
+                "Enter: connect/stop  ·  F2: rename  ·  F5: refresh  ·  "
+                "Right-click: copy"
             ),
             foreground="#666",
         ).pack(anchor="w", pady=(0, 6))
 
         body = ttk.Frame(root)
-        body.pack(fill="both", expand=True)
+        self._body = body
 
         # Empty-state shown when there are no instances yet.
         self._empty = ttk.Frame(body, padding=24)
@@ -620,61 +721,99 @@ class TwinBirdApp:
 
         # Table of instances.
         self._table_frame = ttk.Frame(body)
-        columns = ("state", "management", "interface", "ip", "peer", "autostart", "url")
+        columns = ("state", "management", "interface", "ip", "peer", "autostart")
         self.tree = ttk.Treeview(
             self._table_frame, columns=columns, show="tree headings", height=8
         )
-        self.tree.heading("#0", text="Instance")
+        self.tree.heading("#0", text="Local name")
         self.tree.heading("state", text="State")
         self.tree.heading("management", text="Management")
         self.tree.heading("interface", text="Adapter")
         self.tree.heading("ip", text="NetBird IP")
         self.tree.heading("peer", text="Peer name")
         self.tree.heading("autostart", text="Autostart")
-        self.tree.heading("url", text="Management URL")
-        self.tree.column("#0", width=135, minwidth=110, stretch=False)
+        self.tree.column("#0", width=135, minwidth=85, stretch=True)
+        self.tree.column("state", width=75, minwidth=65, anchor="center", stretch=True)
         self.tree.column(
-            "state", width=145, minwidth=125, anchor="center", stretch=False
+            "management", width=110, minwidth=100, anchor="center", stretch=True
         )
         self.tree.column(
-            "management", width=110, minwidth=100, anchor="center", stretch=False
+            "interface", width=70, minwidth=60, anchor="center", stretch=True
         )
+        self.tree.column("ip", width=115, minwidth=95, anchor="center", stretch=True)
+        self.tree.column("peer", width=170, minwidth=100, stretch=True)
         self.tree.column(
-            "interface", width=85, minwidth=75, anchor="center", stretch=False
+            "autostart", width=80, minwidth=70, anchor="center", stretch=True
         )
-        self.tree.column("ip", width=135, minwidth=115, anchor="center", stretch=False)
-        self.tree.column("peer", width=210, minwidth=150, stretch=True)
-        self.tree.column(
-            "autostart", width=100, minwidth=85, anchor="center", stretch=False
-        )
-        self.tree.column("url", width=245, minwidth=190, stretch=True)
-        self.tree.tag_configure("running", foreground="#16713b")
-        self.tree.tag_configure("stopped", foreground="#737b87")
-        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.tag_configure("running", foreground="#166534")
+        self.tree.tag_configure("stopped", foreground="#64748b")
+        self._table_frame.rowconfigure(0, weight=1)
+        self._table_frame.columnconfigure(0, weight=1)
+        self._table_frame.grid_propagate(False)
+        self.tree.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(
             self._table_frame, orient="vertical", command=self.tree.yview
         )
         self.tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
+        scroll.grid(row=0, column=1, sticky="ns")
         hscroll = ttk.Scrollbar(
             self._table_frame, orient="horizontal", command=self.tree.xview
         )
         self.tree.configure(xscrollcommand=hscroll.set)
-        hscroll.pack(side="bottom", fill="x")
-        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_buttons())
+        hscroll.grid(row=1, column=0, sticky="ew")
+        self.tree.bind("<<TreeviewSelect>>", self._on_selection_changed)
         self.tree.bind("<Double-1>", self._on_row_double_click)
+        self.tree.bind("<Return>", self._activate_selected)
+        self.tree.bind("<KP_Enter>", self._activate_selected)
+        self.tree.bind("<F2>", self._rename_selected)
+        self.tree.bind("<Control-c>", lambda _e: self._copy_selected("details"))
+        self.tree.bind("<Button-3>", self._show_context_menu)
+        if sys.platform == "darwin":
+            self.tree.bind("<Control-Button-1>", self._show_context_menu)
+            self.tree.bind("<Command-c>", lambda _e: self._copy_selected("details"))
+        self.root.bind("<F5>", lambda _e: self.refresh())
+        self.root.bind("<Escape>", lambda _e: self._cancel_current_action())
 
-        logframe = ttk.LabelFrame(root, text="Activity log", padding=(8, 6))
-        logframe.pack(fill="x", pady=(12, 0))
+        details = ttk.LabelFrame(root, text="Selected connection", padding=(8, 5))
+        self._details_panel = details
+        self._details_var = tk.StringVar(value="Select an instance to see its details.")
+        self._details_label = ttk.Label(
+            details, textvariable=self._details_var, justify="left", wraplength=1000
+        )
+        self._details_label.pack(anchor="w", fill="x")
+        self.root.bind("<Configure>", self._resize_details)
+
+        logframe = ttk.LabelFrame(root, text="Activity log", padding=(6, 4))
+        self._log_panel = logframe
+        logframe.pack(fill="x", side="bottom", pady=(6, 0))
         self.log = tk.Text(
             logframe,
-            height=5,
+            height=2,
             state="disabled",
             wrap="word",
             relief="flat",
             background="#f6f6f6",
         )
-        self.log.pack(fill="x")
+        logframe.columnconfigure(0, weight=1)
+        self.log.grid(row=0, column=0, sticky="ew")
+        logscroll = ttk.Scrollbar(logframe, orient="vertical", command=self.log.yview)
+        self.log.configure(yscrollcommand=logscroll.set)
+        logscroll.grid(row=0, column=1, sticky="ns")
+        # Reserve the lower panels first; small windows shrink the table.
+        details.pack(fill="x", side="bottom", pady=(6, 0))
+        body.pack(fill="both", expand=True)
+
+    def _update_panel_visibility(self) -> None:
+        self._log_panel.pack_forget()
+        self._details_panel.pack_forget()
+        if self._log_visible.get():
+            self._log_panel.pack(
+                fill="x", side="bottom", pady=(6, 0), before=self._body
+            )
+        if self._details_visible.get():
+            self._details_panel.pack(
+                fill="x", side="bottom", pady=(6, 0), before=self._body
+            )
 
     def _build_help_tab(self, parent: ttk.Frame) -> None:
         container = ttk.Frame(parent, padding=4)
@@ -759,6 +898,7 @@ class TwinBirdApp:
             self._btn_add,
             self._btn_scan,
             self._btn_remove,
+            self._btn_rename,
             self._btn_cancel,
             self._btn_refresh,
         ):
@@ -820,15 +960,17 @@ class TwinBirdApp:
 
         self._status_by_name = {st.name: st for st in statuses}
         selected = self._selected_name()
+        old_y = self.tree.yview()[0]
+        old_x = self.tree.xview()[0]
         self.tree.delete(*self.tree.get_children())
         for st in statuses:
             self.tree.insert(
                 "",
                 "end",
                 iid=st.name,
-                text=st.name,
+                text=st.label,
                 values=(
-                    st.state_label,
+                    st.state_label.split(" (", maxsplit=1)[0].capitalize(),
                     (
                         "Connected"
                         if st.management_connected is True
@@ -840,9 +982,8 @@ class TwinBirdApp:
                     st.netbird_ip or "—",
                     st.peer_name or "—",
                     st.autostart_label,
-                    st.management_url or "",
                 ),
-                tags=("running" if st.up else "stopped",),
+                tags=("running" if st.can_stop else "stopped",),
             )
 
         # Toggle empty-state vs table.
@@ -851,13 +992,18 @@ class TwinBirdApp:
             self._table_frame.pack(fill="both", expand=True)
             if selected and self.tree.exists(selected):
                 self.tree.selection_set(selected)
+                self.tree.focus(selected)
             elif self.tree.get_children():
                 self.tree.selection_set(self.tree.get_children()[0])
+                self.tree.focus(self.tree.get_children()[0])
+            self.tree.yview_moveto(old_y)
+            self.tree.xview_moveto(old_x)
         else:
             self._table_frame.pack_forget()
             self._empty.pack(fill="both", expand=True)
 
         self._update_buttons()
+        self._update_details()
         self._rebuild_tray_menu(statuses)
 
     def _update_buttons(self) -> None:
@@ -875,11 +1021,13 @@ class TwinBirdApp:
                 self._btn_stop,
                 self._btn_auto,
                 self._btn_remove,
+                self._btn_rename,
             ):
                 b.configure(state="disabled")
             return
-        self._btn_start.configure(state="disabled" if st.up else "normal")
-        self._btn_stop.configure(state="normal" if st.up else "disabled")
+        self._btn_start.configure(state="normal" if st.can_start else "disabled")
+        self._btn_stop.configure(state="normal" if st.can_stop else "disabled")
+        self._btn_rename.configure(state="normal")
         self._btn_remove.configure(
             state="disabled" if st.managed_externally else "normal"
         )
@@ -894,14 +1042,140 @@ class TwinBirdApp:
 
     # -- Button handlers --------------------------------------------------- #
 
+    @staticmethod
+    def _invoke_focused_button(event: Any) -> str:
+        event.widget.invoke()
+        return "break"
+
+    def _activate_selected(self, _event: Any = None) -> str:
+        if not self._busy and not self._refreshing:
+            self._on_row_double_click(None)
+        return "break"
+
+    def _rename_selected(self, _event: Any = None) -> str:
+        self._on_rename()
+        return "break"
+
+    def _on_selection_changed(self, _event: Any = None) -> None:
+        self._update_buttons()
+        self._update_details()
+
+    def _resize_details(self, event: Any) -> None:
+        if event.widget is self.root:
+            self._details_label.configure(wraplength=max(300, event.width - 90))
+            if hasattr(self, "_admin_notice_label"):
+                self._admin_notice_label.configure(
+                    wraplength=max(200, event.width - 260)
+                )
+
+    @staticmethod
+    def _details_text(st: InstanceStatus) -> str:
+        ownership = (
+            "Existing NetBird service" if st.managed_externally else "TwinBird-managed"
+        )
+        daemon = "Reachable / running" if st.up else "Not running"
+        return (
+            f"{st.label}  |  {ownership}  |  Instance ID: {st.name}\n"
+            f"Server: {st.management_url or 'Unknown'}\n"
+            f"Adapter: {st.interface_name or 'Unknown'}  |  "
+            f"IP: {st.netbird_ip or 'Not available'}  |  "
+            f"Peer: {st.peer_name or 'Not available'}\n"
+            f"Daemon: {daemon}  |  Control: {st.daemon_addr or 'Unknown'}  |  "
+            f"WireGuard port: {st.wireguard_port or 'Unknown'}  |  "
+            f"PID: {st.pid or 'Service-managed / unavailable'}"
+        )
+
+    def _update_details(self) -> None:
+        name = self._selected_name()
+        st = self._status_by_name.get(name) if name else None
+        self._details_var.set(
+            self._details_text(st) if st else "Select an instance to see its details."
+        )
+
+    def _copy_selected(self, field: str) -> str:
+        name = self._selected_name()
+        st = self._status_by_name.get(name) if name else None
+        if st:
+            value = (
+                self._details_text(st)
+                if field == "details"
+                else getattr(st, field, None)
+            )
+            if value:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(value)
+                self._status_var.set(
+                    "Connection details copied."
+                    if field == "details"
+                    else "Copied to clipboard."
+                )
+        return "break"
+
+    def _show_context_menu(self, event: Any) -> str:
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return "break"
+        self.tree.selection_set(row)
+        self.tree.focus(row)
+        self._on_selection_changed()
+        st = self._status_by_name.get(row)
+        if st is None:
+            return "break"
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(
+            label="Rename…",
+            command=self._on_rename,
+            state="disabled" if self._busy or self._refreshing else "normal",
+        )
+        menu.add_separator()
+        for title, field in (
+            ("Copy IP address", "netbird_ip"),
+            ("Copy peer name", "peer_name"),
+        ):
+            menu.add_command(
+                label=title,
+                command=lambda f=field: self._copy_selected(f),
+                state="normal" if getattr(st, field) else "disabled",
+            )
+        menu.add_command(
+            label="Copy connection details",
+            command=lambda: self._copy_selected("details"),
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    def _on_rename(self) -> None:
+        if self._busy or self._refreshing:
+            return
+        name = self._selected_name()
+        st = self._status_by_name.get(name) if name else None
+        if st is None:
+            return
+        label = simpledialog.askstring(
+            "Rename instance",
+            "Local display name (1-64 characters).\n"
+            "This changes the name in TwinBird; the NetBird peer name stays the same.",
+            initialvalue=st.label,
+            parent=self.root,
+        )
+        if label is not None and label.strip() != st.label:
+            self._run_async(lambda: manager.rename(st.name, label, emit=self._log))
+
     def _on_row_double_click(self, _event: Any) -> None:
+        if self._busy or self._refreshing:
+            return
+        if _event is not None and not self.tree.identify_row(_event.y):
+            return
         name = self._selected_name()
         if not name:
             return
         st = self._status_by_name.get(name)
         if st is None:
             return
-        if st.up:
+        if st.can_stop:
             self._on_stop()
         else:
             self._on_start()
@@ -912,7 +1186,7 @@ class TwinBirdApp:
             return True
         return messagebox.askyesno(
             f"{verb} your main NetBird?",
-            f"'{st.name}' is your existing NetBird connection, shared with the "
+            f"'{st.label}' is your existing NetBird connection, shared with the "
             f"NetBird app. {verb}ing it here affects that same connection.\n\n"
             f"{verb} it now?",
             parent=self.root,
@@ -1034,7 +1308,7 @@ class TwinBirdApp:
         for st in statuses:
             items.append(
                 pystray.MenuItem(
-                    f"{st.name} ({'on' if st.up else 'off'})",
+                    f"{st.label} ({'on' if st.can_stop else 'off'})",
                     self._make_tray_toggle(st.name),
                     checked=lambda item, n=st.name: self._is_up(n),
                 )
@@ -1052,7 +1326,7 @@ class TwinBirdApp:
 
     def _is_up(self, name: str) -> bool:
         st = self._status_by_name.get(name)
-        return bool(st and st.up)
+        return bool(st and st.can_stop)
 
     def _make_tray_toggle(self, name: str) -> Any:
         def toggle(_icon: Any, _item: Any) -> None:
@@ -1060,7 +1334,7 @@ class TwinBirdApp:
                 st = self._status_by_name.get(name)
                 if st is None:
                     return
-                if st.up:
+                if st.can_stop:
                     self._run_async(lambda: manager.stop(name, emit=self._log))
                 elif st.management_url:
                     url = st.management_url
@@ -1110,11 +1384,23 @@ class TwinBirdApp:
 
 
 def run_gui() -> None:
-    if sys.platform == "win32":
-        # Detach a GUI launched from an elevated PowerShell/cmd session so
-        # closing that console does not send a close event to TwinBird.
-        with contextlib.suppress(Exception):
-            import ctypes
-
-            ctypes.windll.kernel32.FreeConsole()
+    if sys.platform == "win32" and os.environ.get("TWINBIRD_GUI_CHILD") != "1":
+        # Start a separate GUI process so the shell prompt returns immediately.
+        launcher = sys.argv[0]
+        if Path(launcher).suffix.casefold() == ".exe":
+            command = [launcher, *sys.argv[1:]]
+        else:
+            command = [sys.executable, "-m", "twinbird.cli", "gui"]
+        child_env = dict(os.environ)
+        child_env["TWINBIRD_GUI_CHILD"] = "1"
+        subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=0x00000008 | 0x00000200,
+            env=child_env,
+        )
+        return
     TwinBirdApp().run()

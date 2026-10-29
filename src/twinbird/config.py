@@ -52,6 +52,8 @@ class InstanceMetadata:
     # service: TwinBird proxies status/up/down to its daemon but never starts its
     # own daemon, touches autostart, or deletes the primary's config.
     managed_externally: bool = False
+    # A user-facing label; `name` remains the stable directory/service identity.
+    display_name: str | None = None
 
 
 def instance_dir(config_root: Path, name: str) -> Path:

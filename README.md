@@ -29,6 +29,20 @@
 > 0.64.2. Linux and macOS support remain experimental; see the platform notes.
 > This is not a stable release. See [CHANGELOG.md](CHANGELOG.md) for changes.
 
+> **Windows version support:** The build defaults to NetBird **0.64.2**, the
+> version previously tested with multiple connections on Windows 11. It creates
+> a separate client using NetBird's existing adapter-ID customization hook and
+> checks that two different IDs are honored. Other release versions can be
+> requested with `-Version`, but remain experimental until VPN connections have
+> been tested. This does not guarantee compatibility with every NetBird release.
+> Your existing NetBird installation is not replaced or modified and does not
+> necessarily need to be version 0.64.2.
+>
+> The revised build script has built 0.64.2 and 0.64.1 successfully and checked
+> two adapter IDs for each. The user subsequently reported a working connection
+> with the revised 0.64.2 client. Version 0.64.1 has only passed the build and
+> adapter-ID checks; routing and DNS were not independently reverified.
+
 ## Copy and paste: start TwinBird
 
 Open a terminal **in this checkout's root directory** and use the block for your
@@ -56,17 +70,22 @@ python -m venv $tbVenv
 if ($LASTEXITCODE -ne 0) { throw 'Could not create the Python environment.' }
 & "$tbVenv\Scripts\python.exe" -m pip install -e '.[gui]'
 if ($LASTEXITCODE -ne 0) { throw 'Could not install TwinBird.' }
-if (-not (Test-Path '.\dist\netbird-twinbird-0.64.2.exe') -or -not (Test-Path '.\dist\wintun.dll')) {
+if (-not (Test-Path '.\dist\netbird-twinbird.exe') -or -not (Test-Path '.\dist\wintun.dll')) {
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-netbird-windows.ps1'
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the compatible NetBird client.' }
 }
-$env:TWINBIRD_NETBIRD_BIN = (Resolve-Path '.\dist\netbird-twinbird-0.64.2.exe').Path
+$env:TWINBIRD_NETBIRD_BIN = (Resolve-Path '.\dist\netbird-twinbird.exe').Path
 & "$tbVenv\Scripts\twinbird.exe" gui
 ```
 
 The build uses the installed NetBird's `wintun.dll` by default and leaves the
 existing NetBird installation in place. Go and Git are only needed when building
 the compatible client.
+
+Why a separate client? Each connection needs its own adapter name **and** internal
+Windows adapter ID. Separate names alone do not avoid the fixed-ID collision in
+stock NetBird 0.64.2. TwinBird gives each connection its own stable ID, and this
+build teaches the separate client to use it. You do not need to choose IDs yourself.
 
 ### Ubuntu and Ubuntu on WSL
 
@@ -81,7 +100,7 @@ elif sudo apt-get update && sudo apt-get install -y python3-venv python3-tk &&
      python3 -m venv "$HOME/.venvs/twinbird" &&
      "$HOME/.venvs/twinbird/bin/python" -m pip install -e '.[gui]'; then
   export TWINBIRD_NETBIRD_BIN="$(command -v netbird)"
-  export TWINBIRD_CONFIG_DIR="$HOME/.config/twinbird"
+  export TWINBIRD_CONFIG_DIR="${TWINBIRD_CONFIG_DIR:-$HOME/.config/twinbird}"
   sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR,TWINBIRD_NETBIRD_BIN,TWINBIRD_CONFIG_DIR \
     "$HOME/.venvs/twinbird/bin/twinbird" gui
 else
@@ -92,6 +111,11 @@ fi
 The GUI runs elevated so it can create an interface. Its configured files are
 therefore root-owned. WSL displays a window without a tray icon; **Scan for
 existing** searches inside WSL and does not import the Windows connection.
+On Linux/WSL the GUI runs in the foreground: keep this terminal open while
+using the window. Automatic background launch currently applies to Windows.
+The config-directory setting preserves an existing `TWINBIRD_CONFIG_DIR` value.
+Reuse the directory from previous sessions to see those saved instances; using
+a different directory opens a separate local setup.
 
 ### macOS: experimental, not yet tested
 
@@ -135,6 +159,14 @@ client built from NetBird's source with a small per-instance GUID patch. It does
 not replace or modify your installed NetBird executable or its configuration.
 
 ### Supported NetBird peer type
+
+For an imported **primary**, **Stop** disconnects its VPN while the existing
+NetBird service keeps running. After refresh, **Start** reconnects through that
+same daemon; a disconnected service is shown as `disconnected (existing)`.
+TwinBird does not replace the primary service or change its autostart. If the
+service itself has been stopped outside TwinBird, start it through the operating
+system's service manager first. In WSL, an imported primary belongs to Linux;
+it is separate from the Windows NetBird installation.
 
 TwinBird is for **server/agent peers enrolled with a setup key**. It does not
 implement NetBird's interactive **user-device** sign-up and login flow. In
@@ -235,14 +267,15 @@ DNS management at the same time.
 
 ## Desktop manager (GUI and tray)
 
-`twinbird gui` opens a small, dependency-light desktop manager. If you prefer not
-to touch the command line, this is all you need.
+`twinbird gui` opens a small, dependency-light desktop manager. On Windows the
+GUI starts in its own process and returns you to the PowerShell prompt immediately.
+The Instances and Help tabs use the same page size, including when the window is resized.
 
 ### Step by step
 
 1. Install NetBird (https://netbird.io) so the `netbird` command is available.
-2. Run `twinbird gui`. A window opens and a bird icon appears in the system tray
-   (bottom-right on Windows).
+2. Run `twinbird gui`. A window opens; a tray icon appears when supported
+   (bottom-right on Windows). WSL runs without a tray icon.
 3. Click **Add instance** and fill in the form (fields explained below).
 4. Click **Add & connect**. A setup key is the most direct GUI login method;
    browser login without a key has not been validated on every platform.
@@ -250,31 +283,60 @@ to touch the command line, this is all you need.
 
 ### The window
 
+- Compact default window (960 pixels wide), smaller controls and scalable table
+  columns. The window can be reduced to 640 × 460 pixels; the horizontal
+  scrollbar does not lock its width. Toggle **Details** and **Log** in the toolbar
+  to hide the lower panels and give more space to the instance list.
 - A tab with every instance: its daemon **state**, **Management** connection,
   network **adapter**, NetBird **IP**,
-  peer **name**, **autostart** status and **management URL**.
+  peer **name** and **autostart** status. A selected-connection panel shows the
+  management URL, stable instance ID, ownership, control address, WireGuard port
+  and PID when available. Unknown values are shown explicitly.
 - Select an instance to enable its actions (double-click a row to start/stop it):
   - **Start / Stop** - connect or disconnect that instance.
+  - **Rename** - change the local display name, including spaces. This works
+    while connected and also for an adopted primary. It does not rename the
+    peer in the NetBird dashboard. The internal ID, identity files, adapter ID
+    and startup paths remain stable, so no reconnect or setup key is needed.
   - **Enable / Disable autostart** - reconnect automatically after you sign in.
   - **Remove** - disconnect and delete a TwinBird-managed instance's local
     settings and autostart. The adopted primary is protected and cannot be removed.
 - **Scan for existing** finds the NetBird already installed on this PC and adds it
   to the list as an adopted instance (read-only toward the primary - see below).
-- **Add instance** and **Refresh** are always available.
+- **Add instance** and **Refresh** are available when no action is running.
+- **Enter** on a selected row connects/disconnects it. Enter also submits the
+  add dialog and activates a focused button. **F2** renames, **F5** refreshes,
+  and **Escape** requests cancellation of a pending connection.
+- Right-click a row to rename it or copy its IP, peer name or connection details.
+  **Ctrl+C** in the table copies details; **Cmd+C** is also supported on macOS.
+- Vertical scroll controls stay beside the rows and the horizontal scrollbar
+  stays below them. Details and the scrollable activity log remain visible when
+  resizing; the table gets the remaining space. Windows display scaling is
+  enabled for sharper text and controls.
+- The **Instances** and **Help** tab buttons have equal width and height. Selecting
+  a tab changes its colour without changing its dimensions. Both pages keep the
+  same window size when you switch between them; buttons use compact spacing.
 - Status is a snapshot checked at startup, after an action, or when you click
   **Refresh status**. The bottom bar shows when the check finished. Management
   is `Unknown` if a NetBird status query could not be read. A running daemon is
   not by itself proof that Management or a peer is reachable.
-- **Cancel operation** appears during a connection attempt and stops the pending
+- **Cancel operation** is enabled during a connection attempt and stops the pending
   NetBird CLI request and its temporary TwinBird daemon.
 - An **activity log** at the bottom shows what each action did.
 - A **Help** tab explains everything inside the app.
+
+NetBird uses WireGuard connections between peers, preferring a direct P2P path
+and falling back to a relay when necessary. Setup-key registration and the
+Management column concern the control plane; they do not prove that a specific
+peer connection is direct. TwinBird preserves this NetBird behavior and does not
+automatically bridge its separate accounts. See [how NetBird works](https://docs.netbird.io/about-netbird/how-netbird-works).
 
 <p align="center">
   <img src="Example.png" alt="TwinBird GUI running in WSL window-only mode" width="100%">
 </p>
 
-*Example GUI session in WSL. WSLg displays the window without a system-tray icon.*
+*Earlier GUI session in WSL, before the current layout refresh. WSLg displays
+the window without a system-tray icon.*
 
 ### Add-instance fields
 
@@ -345,14 +407,30 @@ can register a peer before adapter creation fails, leaving a recently seen peer
 in the NetBird dashboard without a working local interface. Administrator rights
 do not resolve this GUID collision. Windows multi-instance support requires a
 NetBird client build that reads a per-instance Wintun GUID from
-`TWINBIRD_WINTUN_GUID`. TwinBird supplies a patch/build script at
-`scripts/build-netbird-windows.ps1` for NetBird 0.64.2. Install Go 1.25 or newer
+`TWINBIRD_WINTUN_GUID`. TwinBird supplies a build script at
+`scripts/build-netbird-windows.ps1`, defaulting to NetBird 0.64.2. Install Go 1.25 or newer
 and Git, then run the script once from the checkout in PowerShell:
 
 ```powershell
 .\scripts\build-netbird-windows.ps1
 twinbird gui
 ```
+
+The script adds a small Windows initialization file that passes the instance ID
+to NetBird's existing `CustomWindowsGUIDString` hook. It does not search and
+replace NetBird function bodies. It checks the release tag and source commit,
+builds to a temporary output, and verifies two IDs through NetBird's actual GUID
+function before publishing `dist/netbird-twinbird.exe`. If compilation or the
+GUID checks fail, the previous executable is kept. These checks create no
+adapter and do not authenticate a peer.
+
+To try another published release, pass `-Version` with its numeric release
+version. The script checks that the required hook still compiles and works;
+this is not proof of VPN, DNS, routing, or CLI compatibility. Only 0.64.2 has
+previously been tested with Windows multi-instance connections. Existing
+modified source directories are rejected rather than overwritten; use a fresh
+`-SourcePath` if needed. The old `netbird-twinbird-0.64.2.exe` remains a fallback
+for editable installs when the new executable is absent.
 
 `pip install -e ".[gui]"` does not run this script. The resulting `dist` files
 are local build outputs and are not included in a Git checkout or Python wheel.
@@ -365,7 +443,7 @@ An explicitly set `TWINBIRD_NETBIRD_BIN` takes precedence; set it to the
 compatible executable if you use a different location:
 
 ```powershell
-$env:TWINBIRD_NETBIRD_BIN = "C:\path\to\netbird-twinbird-0.64.2.exe"
+$env:TWINBIRD_NETBIRD_BIN = "C:\path\to\netbird-twinbird.exe"
 twinbird gui
 ```
 
@@ -475,10 +553,14 @@ binary installed inside WSL:
 
 ```bash
 export TWINBIRD_NETBIRD_BIN="$(command -v netbird)"
-export TWINBIRD_CONFIG_DIR="/tmp/twinbird-wsl-${USER}"
+export TWINBIRD_CONFIG_DIR="${TWINBIRD_CONFIG_DIR:-$HOME/.config/twinbird}"
 sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR,TWINBIRD_NETBIRD_BIN,TWINBIRD_CONFIG_DIR \
   "$HOME/.venvs/twinbird/bin/twinbird" gui
 ```
+
+Use the same `TWINBIRD_CONFIG_DIR` as your previous sessions if you already have
+instances. For a disposable test you can set it to a separate `/tmp` directory
+before running these commands; `/tmp` state may disappear after a reboot.
 
 In the GUI, choose **Add instance** and enter a setup key for a server/agent peer.
 Skip **Scan for existing** unless you already have a NetBird installation inside

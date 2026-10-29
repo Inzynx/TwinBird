@@ -92,10 +92,30 @@ class InstanceStatus:
     netbird_ip: str | None = None
     peer_name: str | None = None
     management_connected: bool | None = None
+    display_name: str | None = None
+    wireguard_port: int | None = None
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.name
 
     @property
     def up(self) -> bool:
         return self.running or self.reachable
+
+    @property
+    def can_start(self) -> bool:
+        # An adopted service stays reachable after `netbird down`. Reconnecting
+        # it must remain possible, including when its status query failed.
+        return not self.up or (
+            self.managed_externally and self.management_connected is not True
+        )
+
+    @property
+    def can_stop(self) -> bool:
+        return self.up and not (
+            self.managed_externally and self.management_connected is False
+        )
 
     @property
     def autostart_label(self) -> str:
@@ -108,6 +128,8 @@ class InstanceStatus:
         if not self.up:
             return "stopped"
         if self.managed_externally:
+            if self.management_connected is False:
+                return "disconnected (existing)"
             return "running (existing)"
         return "running (persistent)" if self.persistent else "running"
 
@@ -391,6 +413,7 @@ def start(
         created_at=datetime.now(timezone.utc).isoformat(),
         service_registered=True,
         wireguard_port=resolved_port,
+        display_name=existing.display_name if existing else None,
     )
     write_metadata(platform.config_root, metadata)
     emit(
@@ -480,6 +503,31 @@ def set_autostart(name: str, enabled: bool, *, emit: Emit = _noop) -> None:
         metadata.service_registered = False
         emit(f"Autostart disabled for '{name}'.")
     write_metadata(platform.config_root, metadata)
+
+
+def rename(name: str, label: str, *, emit: Emit = _noop) -> None:
+    """Change the local label without moving identity files or service paths."""
+    _require_valid(name)
+    label = label.strip()
+    if not label or len(label) > 64 or not label.isprintable():
+        raise ManagerError("Use a name of 1-64 printable characters.")
+    platform = get_platform_config()
+    metadata = read_metadata(platform.config_root, name)
+    if metadata is None:
+        raise ManagerError(f"Instance '{name}' not found.")
+    for other in list_instances(platform.config_root):
+        if other == name:
+            continue
+        existing = read_metadata(platform.config_root, other)
+        if (
+            existing
+            and (existing.display_name or existing.name).casefold() == label.casefold()
+        ):
+            raise ManagerError(f"An instance named '{label}' already exists.")
+    old_label = metadata.display_name or name
+    metadata.display_name = label if label != name else None
+    write_metadata(platform.config_root, metadata)
+    emit(f"Renamed '{old_label}' to '{label}'.")
 
 
 def remove(name: str, *, emit: Emit = _noop) -> None:
@@ -593,6 +641,8 @@ def get_status(name: str) -> InstanceStatus | None:
         netbird_ip=netbird_ip,
         peer_name=peer_name,
         management_connected=management_connected,
+        display_name=metadata.display_name,
+        wireguard_port=metadata.wireguard_port,
     )
 
 

@@ -7,6 +7,37 @@ from twinbird.netbird import find_netbird_bin
 
 
 class TestFindNetbirdBin:
+    def test_prefers_version_independent_build(self, tmp_path: Path) -> None:
+        build_dir = tmp_path / "dist"
+        build_dir.mkdir()
+        current = build_dir / "netbird-twinbird.exe"
+        current.touch()
+        (build_dir / "netbird-twinbird-0.64.2.exe").touch()
+        with (
+            patch("twinbird.netbird.sys.platform", "win32"),
+            patch(
+                "twinbird.netbird.__file__", str(tmp_path / "src/twinbird/netbird.py")
+            ),
+            patch("shutil.which", side_effect=lambda name: name),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            assert find_netbird_bin() == str(current)
+
+    def test_keeps_legacy_build_as_fallback(self, tmp_path: Path) -> None:
+        build_dir = tmp_path / "dist"
+        build_dir.mkdir()
+        legacy = build_dir / "netbird-twinbird-0.64.2.exe"
+        legacy.touch()
+        with (
+            patch("twinbird.netbird.sys.platform", "win32"),
+            patch(
+                "twinbird.netbird.__file__", str(tmp_path / "src/twinbird/netbird.py")
+            ),
+            patch("shutil.which", side_effect=lambda name: name),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            assert find_netbird_bin() == str(legacy)
+
     def test_found_on_path(self) -> None:
         with (
             patch("shutil.which", return_value="/usr/bin/netbird"),

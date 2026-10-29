@@ -104,6 +104,99 @@ class TestMultipleInstances:
         assert len(addrs) == 4
 
 
+class TestRename:
+    def _create(self, tmp_path: Path, name: str = "office", external: bool = False):
+        ensure_instance_dir(tmp_path, name)
+        metadata = InstanceMetadata(
+            name,
+            "https://u",
+            "tcp://127.0.0.1:42050",
+            "wt7",
+            42,
+            "t",
+            wireguard_port=51825,
+            managed_externally=external,
+        )
+        write_metadata(tmp_path, metadata)
+        return metadata
+
+    def test_rename_preserves_identity_and_service(self, tmp_path: Path) -> None:
+        from dataclasses import asdict
+
+        before = self._create(tmp_path)
+        key_file = tmp_path / "office" / "identity-test.txt"
+        key_file.write_text("unchanged identity")
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch("twinbird.manager.start_daemon") as start,
+            patch("twinbird.manager.stop") as stop,
+            patch("twinbird.manager.register_service") as register,
+        ):
+            manager.rename("office", "  Office network  ")
+        after = read_metadata(tmp_path, "office")
+        assert after is not None
+        assert after.display_name == "Office network"
+        expected = asdict(before)
+        expected["display_name"] = "Office network"
+        assert asdict(after) == expected
+        assert key_file.read_text() == "unchanged identity"
+        assert not (tmp_path / "Office network").exists()
+        start.assert_not_called()
+        stop.assert_not_called()
+        register.assert_not_called()
+
+    @pytest.mark.parametrize("label", ["", " ", "x" * 65, "invalid\nname"])
+    def test_rejects_invalid_labels(self, tmp_path: Path, label: str) -> None:
+        self._create(tmp_path)
+        with pytest.raises(ManagerError):
+            manager.rename("office", label)
+
+    def test_duplicate_label_is_rejected(self, tmp_path: Path) -> None:
+        self._create(tmp_path)
+        self._create(tmp_path, "home")
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            pytest.raises(ManagerError, match="already exists"),
+        ):
+            manager.rename("office", "HOME")
+
+    def test_label_survives_instance_restart(self, tmp_path: Path) -> None:
+        self._create(tmp_path)
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch("twinbird.manager.find_netbird_bin", return_value="custom.exe"),
+            patch("twinbird.manager.read_pid", return_value=None),
+            patch("twinbird.manager.start_daemon", return_value=123),
+            patch(
+                "twinbird.manager.run_up",
+                return_value=MagicMock(returncode=0, stdout=""),
+            ),
+            patch("twinbird.manager.register_service"),
+        ):
+            manager.rename("office", "Office network")
+            manager.start("office", "https://u", interactive=False)
+        meta = read_metadata(tmp_path, "office")
+        assert meta and meta.display_name == "Office network"
+        assert meta.name == "office" and meta.wireguard_port == 51825
+
+    def test_primary_label_does_not_remove_protection(self, tmp_path: Path) -> None:
+        self._create(tmp_path, "primary", external=True)
+        with patch(
+            "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+        ):
+            manager.rename("primary", "Main VPN")
+            with pytest.raises(ManagerError, match="cannot be removed"):
+                manager.remove("primary")
+        meta = read_metadata(tmp_path, "primary")
+        assert meta and meta.display_name == "Main VPN" and meta.managed_externally
+
+
 class TestStatus:
     def test_list_and_get_status(self, tmp_path: Path) -> None:
         platform = _platform(tmp_path)
@@ -400,6 +493,29 @@ class TestExternalGating:
             pytest.raises(ManagerError),
         ):
             manager.set_autostart("primary", True)
+
+    def test_reconnect_primary_uses_existing_daemon_without_isolation(
+        self, tmp_path: Path
+    ) -> None:
+        self._adopt(tmp_path)
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_up",
+                return_value=MagicMock(returncode=0, stdout=""),
+            ) as up,
+            patch("twinbird.manager.start_daemon") as daemon,
+            patch("twinbird.manager.register_service") as register,
+        ):
+            manager.start("primary", "https://api.netbird.io:443", interactive=False)
+        up.assert_called_once()
+        assert up.call_args.kwargs["isolate"] is False
+        assert up.call_args.args[1] == "tcp://127.0.0.1:41731"
+        daemon.assert_not_called()
+        register.assert_not_called()
 
     def test_remove_protects_primary(self, tmp_path: Path) -> None:
         platform = _platform(tmp_path)

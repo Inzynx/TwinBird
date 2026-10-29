@@ -34,11 +34,12 @@ def find_netbird_bin() -> str:
     if bin_path == "netbird" and sys.platform == "win32":
         # Prefer the local patched build when this editable source checkout has
         # one. The build output is ignored by git and optional for other users.
-        local_build = (
-            Path(__file__).resolve().parents[2] / "dist" / "netbird-twinbird-0.64.2.exe"
-        )
-        if local_build.is_file():
-            bin_path = str(local_build)
+        build_dir = Path(__file__).resolve().parents[2] / "dist"
+        for filename in ("netbird-twinbird.exe", "netbird-twinbird-0.64.2.exe"):
+            local_build = build_dir / filename
+            if local_build.is_file():
+                bin_path = str(local_build)
+                break
     if bin_path != "netbird":
         if not shutil.which(bin_path):
             msg = (

@@ -22,8 +22,48 @@ The README now includes copyable startup steps and test status for Windows 11,
 Ubuntu/WSL and macOS. A setup-key GUI connection was confirmed in WSL; macOS is
 source-reviewed and remains untested on a Mac.
 
+### Fixed
+
+- Reduced default/minimum GUI sizes to 960 pixels wide / 640 × 460 pixels,
+  with smaller fonts, buttons, headings and rows. Table columns now shrink and
+  the scrollbar does not determine the window's minimum width. Removed the
+  unnecessary page-size synchronization; equal tab buttons remain unchanged.
+  Details and Log can be hidden from the toolbar for a compact view.
+- Table scrollbars use separate grid cells, avoiding misplaced arrow controls.
+  Enter activates rows, focused buttons and add-dialog submission; double-click
+  on a heading no longer toggles a connection. Details and log stay visible when
+  resizing, and Windows display scaling renders text and controls sharply.
+- Instances and Help tabs now keep the same window/page dimensions when switching;
+  button padding is more compact. Verified with live Tk windows on Windows and
+  Ubuntu/WSL.
+- Both tab buttons have equal width and height in every selection state. Removed
+  Clam's inherited selected-tab padding, which previously changed their size.
+- WSL startup examples use the same persistent configuration-directory default
+  and retain an existing environment override so saved instances stay discoverable.
+- Windows starts the GUI as a detached process and returns the PowerShell prompt
+  immediately; the GUI process does not depend on the shell remaining open.
+- An imported primary can be reconnected after Stop even though its daemon
+  remains reachable. Buttons, double-click and tray actions use the primary's
+  Management connection status. Unknown status permits a reconnect attempt;
+  primary removal and autostart protections remain in place. Regression tests
+  passed, with module imports and reconnect state also checked in Ubuntu/WSL.
+
 ### Added
 
+- Refreshed desktop theme, local display names with Rename/F2, and a connection
+  detail panel. Renaming preserves directories, identity, service paths and
+  adapter IDs, including for adopted primary entries. Copy IP/peer/details from
+  the context menu or copy details with Ctrl+C. Actual Tk window checks passed
+  on Windows and Ubuntu/WSL; macOS remains untested.
+- Windows build uses NetBird's existing GUID customization hook through an
+  added initialization file, with no replacement of existing function bodies.
+  Supports an explicit release version, checks two GUIDs before publishing the
+  executable, and uses a version-independent output name with legacy fallback.
+  Additional releases remain experimental until VPN operation is tested.
+  Actual builds and two-ID checks passed for 0.64.2 and 0.64.1. The user reported
+  a working connection with the revised 0.64.2 build; 0.64.1 remains build/check
+  only. An identical Wintun DLL is
+  reused, allowing a build while an existing daemon has that DLL open.
 - GUI status snapshots with last-check time and a separate Management connection
   indicator; checks run at startup, after actions and on manual refresh.
 - A separate Windows NetBird 0.64.2 build with an instance-specific Wintun GUID,

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 import typer
+
+from twinbird.daemon import is_daemon_reachable
+from twinbird.platform import (
+    hidden_process_flags,
+    managed_child_env,
+    managed_netbird_home,
+)
 
 
 def _task_name(name: str) -> str:
@@ -24,11 +33,13 @@ def _build_netbird_cmd(
         "service",
         "run",
         "--config",
-        str(config_dir / "config.json"),
+        str(managed_netbird_home(config_dir) / "config.json"),
         "--daemon-addr",
         daemon_addr,
         "--log-file",
-        str(log_file),
+        str(managed_netbird_home(config_dir) / "daemon.log")
+        if sys.platform == "win32"
+        else str(log_file),
     ]
 
 
@@ -54,6 +65,27 @@ def unregister_service(name: str) -> None:
         _unregister_macos(name)
     else:
         _unregister_linux(name)
+
+
+def stop_registered_service(name: str) -> None:
+    """Stop a service-launched daemon when its original PID is unavailable."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["schtasks", "/end", "/tn", _task_name(name)],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=hidden_process_flags(),
+            timeout=15,
+        )
+    elif sys.platform != "darwin":
+        subprocess.run(
+            ["systemctl", "--user", "stop", f"twinbird-{name}.service"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
 
 
 def is_service_registered(name: str) -> bool:
@@ -111,17 +143,29 @@ def _request_elevation(command_line: str) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        creationflags=hidden_process_flags(),
     )
 
 
-def _write_task_xml(name: str, parts: list[str]) -> Path:
-    """Write a Task Scheduler XML definition to a temp file and return its path."""
-    from xml.sax.saxutils import escape as xml_escape
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
+
+def _write_task_xml(
+    name: str, parts: list[str], environment: dict[str, str] | None = None
+) -> Path:
+    """Write a Task Scheduler XML definition to a temp file and return its path."""
     # Wrap in PowerShell to avoid a visible console window
-    ps_args = " ".join(f"'{p}'" for p in parts)
+    ps_args = " ".join(_powershell_quote(p) for p in parts)
     command = "powershell.exe"
-    arguments = f'-WindowStyle Hidden -NoProfile -Command "& {ps_args}"'
+    assignments = ""
+    if environment:
+        assignments = "; ".join(
+            f"$env:{key}={_powershell_quote(value)}"
+            for key, value in environment.items()
+        )
+        assignments += "; "
+    arguments = f'-WindowStyle Hidden -NoProfile -Command "{assignments}& {ps_args}"'
 
     xml_content = _TASK_XML_TEMPLATE.format(
         command=xml_escape(command),
@@ -141,7 +185,13 @@ def _register_windows(
 ) -> None:
     parts = _build_netbird_cmd(netbird_bin, config_dir, daemon_addr, log_file)
     task_name = _task_name(name)
-    xml_file = _write_task_xml(name, parts)
+    child_env = managed_child_env(config_dir)
+    task_env = {
+        key: child_env[key]
+        for key in ("PROGRAMDATA", "NB_STATE_DIR", "TWINBIRD_WINTUN_GUID")
+        if key in child_env
+    }
+    xml_file = _write_task_xml(name, parts, task_env)
 
     try:
         result = subprocess.run(
@@ -149,6 +199,7 @@ def _register_windows(
             capture_output=True,
             text=True,
             check=False,
+            creationflags=hidden_process_flags(),
         )
         if result.returncode == 0:
             return
@@ -172,6 +223,7 @@ def _unregister_windows(name: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        creationflags=hidden_process_flags(),
     )
     if result.returncode == 0:
         return
@@ -186,6 +238,8 @@ def _is_registered_windows(name: str) -> bool:
         capture_output=True,
         text=True,
         check=False,
+        creationflags=hidden_process_flags(),
+        timeout=8,
     )
     return result.returncode == 0
 
@@ -206,6 +260,7 @@ _SYSTEMD_UNIT_TEMPLATE = """\
 Description=Twinbird instance: {name}
 
 [Service]
+Environment={state_environment}
 ExecStart={exec_start}
 Restart=on-failure
 RestartSec=5
@@ -230,7 +285,13 @@ def _register_linux(
 
     unit_path = _systemd_unit_path(name)
     unit_path.write_text(
-        _SYSTEMD_UNIT_TEMPLATE.format(name=name, exec_start=exec_start)
+        _SYSTEMD_UNIT_TEMPLATE.format(
+            name=name,
+            exec_start=exec_start,
+            state_environment=shlex.quote(
+                "NB_STATE_DIR=" + str(config_dir.resolve()).replace("%", "%%")
+            ),
+        )
     )
 
     reload_result = subprocess.run(
@@ -306,6 +367,11 @@ _LAUNCHD_PLIST_TEMPLATE = """\
     <array>
 {program_arguments}
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NB_STATE_DIR</key>
+        <string>{state_dir}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -329,9 +395,10 @@ def _register_macos(
     plist_dir = _launchd_plist_dir()
     plist_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd_parts = _build_netbird_cmd(netbird_bin, config_dir, daemon_addr, log_file)
+    resolved_binary = shutil.which(netbird_bin) or netbird_bin
+    cmd_parts = _build_netbird_cmd(resolved_binary, config_dir, daemon_addr, log_file)
     program_arguments = "\n".join(
-        f"        <string>{part}</string>" for part in cmd_parts
+        f"        <string>{xml_escape(part)}</string>" for part in cmd_parts
     )
 
     plist_path = _launchd_plist_path(name)
@@ -339,9 +406,16 @@ def _register_macos(
         _LAUNCHD_PLIST_TEMPLATE.format(
             name=name,
             program_arguments=program_arguments,
-            log_file=str(log_file),
+            state_dir=xml_escape(str(config_dir.resolve())),
+            log_file=xml_escape(str(log_file)),
         )
     )
+
+    # The currently running daemon owns this socket. Loading a RunAtLoad job
+    # immediately would start a second daemon against the same state directory.
+    # A LaunchAgent in this directory will be discovered on the next login.
+    if is_daemon_reachable(daemon_addr):
+        return
 
     result = subprocess.run(
         ["launchctl", "load", str(plist_path)],

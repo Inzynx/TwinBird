@@ -92,3 +92,76 @@ def status(
 def list_cmd() -> None:
     """List all known instances and their state."""
     inst.list_all()
+
+
+@app.command()
+def remove(
+    name: str = typer.Argument(help="Instance name"),
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Do not prompt for confirmation."),
+    ] = False,
+) -> None:
+    """Stop an instance and delete all of its local state."""
+    from twinbird import manager
+    from twinbird.manager import ManagerError
+
+    if not yes:
+        typer.confirm(f"Remove instance '{name}' and delete its config?", abort=True)
+    try:
+        manager.remove(name, emit=typer.echo)
+    except ManagerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def autostart(
+    name: str = typer.Argument(help="Instance name"),
+    enable: Annotated[
+        bool | None,
+        typer.Option(
+            "--enable/--disable",
+            help="Enable or disable start-on-boot for this instance.",
+        ),
+    ] = None,
+) -> None:
+    """Enable or disable start-on-boot for an instance."""
+    from twinbird import manager
+    from twinbird.manager import ManagerError
+
+    if enable is None:
+        typer.echo("Specify --enable or --disable.", err=True)
+        raise typer.Exit(1)
+    try:
+        manager.set_autostart(name, enable, emit=typer.echo)
+    except ManagerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="import")
+def import_cmd(
+    name: str = typer.Argument("primary", help="Name for the adopted instance"),
+) -> None:
+    """Detect an existing NetBird install and integrate it (read-only)."""
+    from twinbird import manager
+    from twinbird.manager import ManagerError
+
+    try:
+        manager.import_primary(name, emit=typer.echo)
+    except ManagerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def gui() -> None:
+    """Open the TwinBird desktop manager (system-tray icon + window)."""
+    from twinbird.gui import run_gui
+
+    run_gui()
+
+
+if __name__ == "__main__":
+    app()

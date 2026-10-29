@@ -71,3 +71,63 @@ class TestStopDaemon:
         from twinbird.config import read_pid
 
         assert read_pid(tmp_path, "office") is None
+
+
+class TestIsDaemonProcess:
+    def test_unknown_image_is_permitted(self) -> None:
+        from twinbird.daemon import is_daemon_process
+
+        with patch("twinbird.daemon._process_image_path", return_value=None):
+            assert is_daemon_process(1234, "netbird") is True
+
+    def test_netbird_image_matches(self) -> None:
+        from twinbird.daemon import is_daemon_process
+
+        with patch(
+            "twinbird.daemon._process_image_path",
+            return_value="/usr/bin/netbird",
+        ):
+            assert is_daemon_process(1234, "netbird") is True
+
+    def test_foreign_image_rejected(self) -> None:
+        from twinbird.daemon import is_daemon_process
+
+        with patch(
+            "twinbird.daemon._process_image_path",
+            return_value="/usr/bin/sshd",
+        ):
+            assert is_daemon_process(1234, "netbird") is False
+
+
+class TestStopDaemonPidReuse:
+    def test_does_not_kill_recycled_pid(self, tmp_path: Path) -> None:
+        ensure_instance_dir(tmp_path, "office")
+        write_pid(tmp_path, "office", 4321)
+        with (
+            patch("twinbird.daemon.is_process_alive", return_value=True),
+            patch("twinbird.daemon.is_daemon_process", return_value=False),
+            patch("twinbird.daemon.os.kill") as mock_kill,
+        ):
+            stop_daemon(tmp_path, "office", netbird_bin="netbird")
+        mock_kill.assert_not_called()
+        from twinbird.config import read_pid
+
+        assert read_pid(tmp_path, "office") is None
+
+
+class TestReachable:
+    def test_unix_missing_socket(self) -> None:
+        from twinbird.daemon import is_daemon_reachable
+
+        assert is_daemon_reachable("unix:///nonexistent/twinbird.sock") is False
+
+    def test_npipe_absent(self) -> None:
+        from twinbird.daemon import is_daemon_reachable
+
+        with patch("twinbird.daemon.os.path.exists", return_value=False):
+            assert is_daemon_reachable("npipe://twinbird-nope") is False
+
+    def test_bad_scheme(self) -> None:
+        from twinbird.daemon import is_daemon_reachable
+
+        assert is_daemon_reachable("http://x") is False

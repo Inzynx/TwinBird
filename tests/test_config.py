@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from twinbird.config import (
     InstanceMetadata,
@@ -143,3 +146,96 @@ class TestPidFile:
         pid_path = tmp_path / "office" / "daemon.pid"
         pid_path.write_text("not_a_number")
         assert read_pid(tmp_path, "office") is None
+
+
+class TestSeedNetbirdConfig:
+    def _cfg_path(self, d: Path) -> Path:
+        from twinbird.platform import managed_netbird_home
+
+        return managed_netbird_home(d) / "config.json"
+
+    def test_creates_with_iface(self, tmp_path: Path) -> None:
+        import json as _json
+
+        from twinbird.config import seed_netbird_config
+
+        d = ensure_instance_dir(tmp_path, "office")
+        seed_netbird_config(d, "wt7")
+        data = _json.loads(self._cfg_path(d).read_text())
+        assert data["WgIface"] == "wt7"
+
+    def test_preserves_existing_keys(self, tmp_path: Path) -> None:
+        import json as _json
+
+        from twinbird.config import seed_netbird_config
+        from twinbird.platform import managed_netbird_home
+
+        d = ensure_instance_dir(tmp_path, "office")
+        home = managed_netbird_home(d)
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.json").write_text(
+            _json.dumps({"PrivateKey": "SECRET", "WgIface": "old"})
+        )
+        seed_netbird_config(d, "wt7")
+        data = _json.loads(self._cfg_path(d).read_text())
+        assert data["PrivateKey"] == "SECRET"
+        assert data["WgIface"] == "wt7"
+
+    def test_refuses_to_clobber_unparseable(self, tmp_path: Path) -> None:
+        from twinbird.config import seed_netbird_config
+        from twinbird.platform import managed_netbird_home
+
+        d = ensure_instance_dir(tmp_path, "office")
+        home = managed_netbird_home(d)
+        home.mkdir(parents=True, exist_ok=True)
+        cfg = home / "config.json"
+        cfg.write_text("{not valid json, PrivateKey=SECRET")
+        try:
+            seed_netbird_config(d, "wt7")
+            raise AssertionError("should have raised")
+        except RuntimeError:
+            pass
+        # Original content must be intact (no data loss).
+        assert "SECRET" in cfg.read_text()
+
+
+class TestReadMetadataRobustness:
+    def test_corrupt_json_returns_none(self, tmp_path: Path) -> None:
+        ensure_instance_dir(tmp_path, "office")
+        (tmp_path / "office" / "instance.json").write_text("{bad json")
+        assert read_metadata(tmp_path, "office") is None
+
+    def test_unknown_keys_ignored(self, tmp_path: Path) -> None:
+        import json as _json
+
+        ensure_instance_dir(tmp_path, "office")
+        (tmp_path / "office" / "instance.json").write_text(
+            _json.dumps(
+                {
+                    "name": "office",
+                    "management_url": "u",
+                    "daemon_addr": "a",
+                    "interface_name": "wt7",
+                    "pid": 1,
+                    "created_at": "t",
+                    "future_field": "ignored",
+                }
+            )
+        )
+        meta = read_metadata(tmp_path, "office")
+        assert meta is not None
+        assert meta.interface_name == "wt7"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission model")
+class TestPosixPermissions:
+    def test_dir_and_files_owner_only(self, tmp_path: Path) -> None:
+        import stat
+
+        d = ensure_instance_dir(tmp_path, "office")
+        meta = InstanceMetadata("office", "u", "a", "wt7", 1, "t")
+        write_metadata(tmp_path, meta)
+        write_pid(tmp_path, "office", 123)
+        assert stat.S_IMODE((d).stat().st_mode) == 0o700
+        assert stat.S_IMODE((d / "instance.json").stat().st_mode) == 0o600
+        assert stat.S_IMODE((d / "daemon.pid").stat().st_mode) == 0o600

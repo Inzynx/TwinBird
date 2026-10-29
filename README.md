@@ -192,7 +192,9 @@ does not add user-device support.
 
 Use this working tree or a clone containing these changes. Installing `twinbird`
 from PyPI or cloning upstream installs the original project, not this version.
-The `[gui]` extra installs the optional tray dependencies; tkinter is also needed.
+The `[gui]` extra installs the modern Sun Valley theme (`sv-ttk`) and the optional
+tray dependencies (`pystray`, `Pillow`); tkinter is also needed. Without the extra
+the window still works, using the default Tk theme and no tray.
 This installs the Python application and dependencies only. It does **not**
 build or install the separate Windows NetBird client described below.
 
@@ -287,6 +289,10 @@ The Instances and Help tabs use the same page size, including when the window is
   columns. The window can be reduced to 640 × 460 pixels; the horizontal
   scrollbar does not lock its width. Toggle **Details** and **Log** in the toolbar
   to hide the lower panels and give more space to the instance list.
+- Modern Sun Valley theme with a **Dark mode / Light mode** button in the header.
+  The initial theme follows your OS setting (Windows, macOS, and GNOME-based Linux);
+  elsewhere it starts light and you switch with the button. Install with the
+  `[gui]` extra so the theme is available (otherwise the default Tk theme is used).
 - A tab with every instance: its daemon **state**, **Management** connection,
   network **adapter**, NetBird **IP**,
   peer **name** and **autostart** status. A selected-connection panel shows the
@@ -355,9 +361,9 @@ instances keep running.
 
 ### Notes
 
-- The window uses tkinter (bundled with Python). The tray icon needs the optional
-  `twinbird[gui]` extra (`pystray` + `Pillow`); without it the window still works
-  and only the tray is skipped.
+- The window uses tkinter (bundled with Python). The `twinbird[gui]` extra adds the
+  modern Sun Valley theme (`sv-ttk`) and the system-tray icon (`pystray` + `Pillow`);
+  without it the window still works, falling back to the default Tk theme and no tray.
 - All GUI actions run through the same core as the CLI, on background threads, so
   the window stays responsive. A setup key is passed in a temporary file rather
   than on the command line. POSIX permissions are owner-only; Windows inherits the

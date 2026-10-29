@@ -18,6 +18,44 @@ class TestGuiModule:
         assert hasattr(gui, "run_gui")
         assert hasattr(gui, "TwinBirdApp")
 
+    def test_detect_initial_theme_returns_valid(self) -> None:
+        import twinbird.gui as gui
+
+        assert gui._detect_initial_theme() in ("light", "dark")
+
+    def test_detect_initial_theme_macos_dark(self) -> None:
+        import twinbird.gui as gui
+
+        with (
+            patch("twinbird.gui.sys.platform", "darwin"),
+            patch(
+                "twinbird.gui.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout="Dark\n"),
+            ),
+        ):
+            assert gui._detect_initial_theme() == "dark"
+
+    def test_detect_initial_theme_linux_dark(self) -> None:
+        import twinbird.gui as gui
+
+        with (
+            patch("twinbird.gui.sys.platform", "linux"),
+            patch(
+                "twinbird.gui.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout="'prefer-dark'\n"),
+            ),
+        ):
+            assert gui._detect_initial_theme() == "dark"
+
+    def test_detect_initial_theme_linux_light_without_gsettings(self) -> None:
+        import twinbird.gui as gui
+
+        with (
+            patch("twinbird.gui.sys.platform", "linux"),
+            patch("twinbird.gui.subprocess.run", side_effect=FileNotFoundError()),
+        ):
+            assert gui._detect_initial_theme() == "light"
+
     def test_windows_gui_launch_detaches_from_terminal(self) -> None:
         import os
         import subprocess

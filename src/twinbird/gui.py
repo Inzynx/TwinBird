@@ -132,9 +132,14 @@ def _enable_windows_dpi() -> None:
 
 
 def _detect_initial_theme() -> str:
-    """Pick light/dark to match the OS preference on Windows, else light."""
-    if sys.platform == "win32":
-        try:
+    """Pick light/dark to match the OS preference, falling back to light.
+
+    Supports Windows (registry), macOS (``defaults``) and Linux/WSL (GNOME
+    ``gsettings``). Any failure or unknown value yields ``"light"``; the in-app
+    toggle always lets the user switch regardless of detection.
+    """
+    try:
+        if sys.platform == "win32":
             import winreg
 
             key = winreg.OpenKey(
@@ -143,9 +148,31 @@ def _detect_initial_theme() -> str:
             )
             value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
             return "light" if value else "dark"
-        except Exception:
-            return "light"
-    return "light"
+
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            # The key exists and reads "Dark" only in dark mode; absent otherwise.
+            return "dark" if "dark" in result.stdout.strip().lower() else "light"
+
+        # Linux and WSLg: ask GNOME's settings if they are available.
+        for args in (
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
+        ):
+            try:
+                result = subprocess.run(args, capture_output=True, text=True, timeout=2)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if result.returncode == 0 and "dark" in result.stdout.strip().lower():
+                return "dark"
+        return "light"
+    except Exception:
+        return "light"
 
 
 def _make_tray_image() -> Any:

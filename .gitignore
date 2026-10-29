@@ -45,3 +45,7 @@ uv.lock
 
 # Superpowers (local design docs, not for git)
 docs/superpowers/
+
+# Agent/assistant instruction files - kept local, never published
+CLAUDE.md
+AGENTS.md

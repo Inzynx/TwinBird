@@ -131,6 +131,23 @@ def _enable_windows_dpi() -> None:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
 
 
+def _detect_initial_theme() -> str:
+    """Pick light/dark to match the OS preference on Windows, else light."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return "light" if value else "dark"
+        except Exception:
+            return "light"
+    return "light"
+
+
 def _make_tray_image() -> Any:
     """Build the tray icon image (the bundled logo, else a drawn fallback)."""
     from PIL import Image, ImageDraw
@@ -198,7 +215,11 @@ class _AddDialog:
         entry = ttk.Entry(block, show="*" if secret else "")
         entry.pack(fill="x", pady=(3, 2))
         ttk.Label(
-            block, text=help_text, foreground="#666", wraplength=460, justify="left"
+            block,
+            text=help_text,
+            style="Muted.TLabel",
+            wraplength=460,
+            justify="left",
         ).pack(anchor="w")
         return entry
 
@@ -212,7 +233,7 @@ class _AddDialog:
         ttk.Label(
             frame,
             text="Fill in a name and your server URL. Everything else is optional.",
-            foreground="#666",
+            style="Muted.TLabel",
             wraplength=460,
             justify="left",
         ).pack(anchor="w", pady=(2, 2))
@@ -421,6 +442,7 @@ class TwinBirdApp:
         height = min(680, max(460, self.root.winfo_screenheight() - 120))
         self.root.geometry(f"960x{height}")
         self.root.minsize(640, 460)
+        self._theme = _detect_initial_theme()
         self._apply_theme()
 
         self._events: queue.Queue = queue.Queue()
@@ -443,59 +465,142 @@ class TwinBirdApp:
 
     def _apply_theme(self) -> None:
         style = ttk.Style(self.root)
-        with contextlib.suppress(Exception):
-            style.theme_use("clam")
         family = "Segoe UI" if sys.platform == "win32" else "Helvetica"
         tkfont.nametofont("TkDefaultFont").configure(family=family, size=9)
         tkfont.nametofont("TkTextFont").configure(family=family, size=9)
         tkfont.nametofont("TkFixedFont").configure(size=9)
-        self.root.configure(background="#f3f6fa")
-        style.configure(".", background="#f3f6fa", foreground="#1e293b")
-        style.configure("TFrame", background="#f3f6fa")
-        style.configure("TLabel", background="#f3f6fa", foreground="#1e293b")
-        style.configure("Muted.TLabel", foreground="#64748b")
+
+        # Prefer the modern Sun Valley theme (sv-ttk). Fall back to clam with a
+        # hand-tuned palette when sv-ttk is not installed, so the GUI still works.
+        self._sv_ttk = None
+        with contextlib.suppress(Exception):
+            import sv_ttk
+
+            sv_ttk.set_theme(self._theme, self.root)
+            self._sv_ttk = sv_ttk
+
+        if self._sv_ttk is None:
+            with contextlib.suppress(Exception):
+                style.theme_use("clam")
+            self.root.configure(background="#f3f6fa")
+            style.configure(".", background="#f3f6fa", foreground="#1e293b")
+            style.configure("TFrame", background="#f3f6fa")
+            style.configure("TLabel", background="#f3f6fa", foreground="#1e293b")
+            style.configure("TNotebook", borderwidth=0, tabmargins=(0, 4, 0, 0))
+            style.configure("TNotebook.Tab", padding=(9, 4), width=11, anchor="center")
+            style.map("TNotebook.Tab", padding=[], background=[("selected", "#ffffff")])
+            style.configure(
+                "Treeview",
+                background="#ffffff",
+                fieldbackground="#ffffff",
+                borderwidth=0,
+            )
+            style.configure(
+                "Treeview.Heading",
+                background="#e8eef6",
+                padding=(6, 5),
+                relief="flat",
+            )
+            style.configure("TButton", padding=(6, 3), width=0, background="#ffffff")
+            style.map(
+                "TButton",
+                foreground=[("disabled", "#94a3b8")],
+                background=[("active", "#e8eef6")],
+            )
+            style.configure(
+                "Accent.TButton", background="#2563eb", foreground="#ffffff"
+            )
+            style.map(
+                "Accent.TButton",
+                background=[("disabled", "#cbd5e1"), ("active", "#1d4ed8")],
+                foreground=[("disabled", "#64748b")],
+            )
+            style.configure("TLabelframe", bordercolor="#dbe3ee", borderwidth=1)
+            style.configure("Vertical.TScrollbar", arrowsize=12, width=12)
+            style.configure("Horizontal.TScrollbar", arrowsize=12, width=12)
+
+        self._palette = self._compute_palette()
+        self.root.configure(background=self._palette["window"])
+
+        # Shared tweaks applied on top of whichever base theme is active.
         style.configure("Title.TLabel", font=(family, 16, "bold"))
-        style.configure("TNotebook", borderwidth=0, tabmargins=(0, 4, 0, 0))
-        style.configure("TNotebook.Tab", padding=(9, 4), width=11, anchor="center")
-        # Clam's default selected-state padding makes a selected tab taller.
-        # Clear that map so both tab buttons retain identical dimensions.
-        style.map("TNotebook.Tab", padding=[], background=[("selected", "#ffffff")])
-        style.configure(
-            "Treeview",
-            rowheight=27,
-            font=(family, 9),
-            background="#ffffff",
-            fieldbackground="#ffffff",
-            borderwidth=0,
-        )
-        style.configure(
-            "Treeview.Heading",
-            font=(family, 9, "bold"),
-            background="#e8eef6",
-            padding=(6, 5),
-            relief="flat",
-        )
-        style.map(
-            "Treeview",
-            background=[("selected", "#dbeafe")],
-            foreground=[("selected", "#143b71")],
-        )
-        style.configure("TButton", padding=(6, 3), width=0, background="#ffffff")
-        style.map(
-            "TButton",
-            foreground=[("disabled", "#94a3b8")],
-            background=[("active", "#e8eef6")],
-        )
-        style.configure("Accent.TButton", background="#2563eb", foreground="#ffffff")
-        style.map(
-            "Accent.TButton",
-            background=[("disabled", "#cbd5e1"), ("active", "#1d4ed8")],
-            foreground=[("disabled", "#64748b")],
-        )
-        style.configure("TLabelframe", bordercolor="#dbe3ee", borderwidth=1)
+        style.configure("Muted.TLabel", foreground=self._palette["muted"])
         style.configure("TLabelframe.Label", font=(family, 9, "bold"))
-        style.configure("Vertical.TScrollbar", arrowsize=12, width=12)
-        style.configure("Horizontal.TScrollbar", arrowsize=12, width=12)
+        style.configure("Treeview", rowheight=28, font=(family, 9))
+        style.configure("Treeview.Heading", font=(family, 9, "bold"))
+        style.map(
+            "Treeview",
+            background=[("selected", self._palette["sel_bg"])],
+            foreground=[("selected", self._palette["sel_fg"])],
+        )
+
+    def _compute_palette(self) -> dict[str, str]:
+        if self._theme == "dark":
+            return {
+                "window": "#1c1c1c",
+                "text_bg": "#202020",
+                "text_fg": "#e6e6e6",
+                "muted": "#9aa4b2",
+                "log_bg": "#2a2a2a",
+                "running": "#4ade80",
+                "stopped": "#9aa4b2",
+                "sel_bg": "#2f5fb0",
+                "sel_fg": "#ffffff",
+            }
+        return {
+            "window": "#fafafa",
+            "text_bg": "#ffffff",
+            "text_fg": "#1e293b",
+            "muted": "#5b6472",
+            "log_bg": "#f3f3f3",
+            "running": "#15803d",
+            "stopped": "#6b7280",
+            "sel_bg": "#dbeafe",
+            "sel_fg": "#143b71",
+        }
+
+    def _theme_button_label(self) -> str:
+        return "Dark mode" if self._theme == "light" else "Light mode"
+
+    def _apply_tree_tags(self) -> None:
+        self.tree.tag_configure("running", foreground=self._palette["running"])
+        self.tree.tag_configure("stopped", foreground=self._palette["stopped"])
+
+    def _apply_text_colors(self) -> None:
+        log = getattr(self, "log", None)
+        if log is not None:
+            with contextlib.suppress(Exception):
+                log.configure(
+                    background=self._palette["log_bg"],
+                    foreground=self._palette["text_fg"],
+                )
+        help_text = getattr(self, "_help_text", None)
+        if help_text is not None:
+            with contextlib.suppress(Exception):
+                help_text.configure(
+                    background=self._palette["text_bg"],
+                    foreground=self._palette["text_fg"],
+                )
+
+    def _toggle_theme(self) -> None:
+        if self._sv_ttk is not None:
+            with contextlib.suppress(Exception):
+                self._sv_ttk.toggle_theme()
+                self._theme = self._sv_ttk.get_theme()
+        else:
+            self._theme = "light" if self._theme == "dark" else "dark"
+        self._palette = self._compute_palette()
+        self.root.configure(background=self._palette["window"])
+        style = ttk.Style(self.root)
+        style.configure("Muted.TLabel", foreground=self._palette["muted"])
+        style.map(
+            "Treeview",
+            background=[("selected", self._palette["sel_bg"])],
+            foreground=[("selected", self._palette["sel_fg"])],
+        )
+        self._apply_tree_tags()
+        self._apply_text_colors()
+        self._btn_theme.configure(text=self._theme_button_label())
 
     # -- Branding ---------------------------------------------------------- #
 
@@ -630,6 +735,13 @@ class TwinBirdApp:
         ttk.Label(text, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
         ttk.Label(text, text=APP_SUBTITLE, style="Muted.TLabel").pack(anchor="w")
         ttk.Label(header, text="EXPERIMENTAL", foreground="#8a4b08").pack(side="right")
+        self._btn_theme = ttk.Button(
+            header,
+            text=self._theme_button_label(),
+            width=11,
+            command=self._toggle_theme,
+        )
+        self._btn_theme.pack(side="right", padx=(0, 10))
 
     def _build_instances_tab(self, parent: ttk.Frame) -> None:
         root = ttk.Frame(parent, padding=8)
@@ -667,7 +779,9 @@ class TwinBirdApp:
 
         actions = ttk.Frame(root, padding=(0, 0, 0, 6))
         actions.pack(fill="x")
-        self._btn_start = ttk.Button(actions, text="Start", command=self._on_start)
+        self._btn_start = ttk.Button(
+            actions, text="Start", command=self._on_start, style="Accent.TButton"
+        )
         self._btn_stop = ttk.Button(actions, text="Stop", command=self._on_stop)
         self._btn_auto = ttk.Button(
             actions, text="Enable autostart", command=self._on_toggle_autostart
@@ -690,15 +804,6 @@ class TwinBirdApp:
         )
         self._btn_cancel.pack(side="right", padx=(6, 0))
 
-        ttk.Label(
-            root,
-            text=(
-                "Enter: connect/stop  ·  F2: rename  ·  F5: refresh  ·  "
-                "Right-click: copy"
-            ),
-            foreground="#666",
-        ).pack(anchor="w", pady=(0, 6))
-
         body = ttk.Frame(root)
         self._body = body
 
@@ -714,7 +819,7 @@ class TwinBirdApp:
             text="Click 'Add instance' to connect a NetBird account, or "
             "'Scan for existing' to integrate the NetBird already on this PC.\n"
             "Not sure what to fill in? See the Help tab.",
-            foreground="#666",
+            style="Muted.TLabel",
             justify="center",
         ).pack(pady=(0, 10))
         ttk.Button(self._empty, text="Add instance", command=self._on_add).pack()
@@ -745,8 +850,7 @@ class TwinBirdApp:
         self.tree.column(
             "autostart", width=80, minwidth=70, anchor="center", stretch=True
         )
-        self.tree.tag_configure("running", foreground="#166534")
-        self.tree.tag_configure("stopped", foreground="#64748b")
+        self._apply_tree_tags()
         self._table_frame.rowconfigure(0, weight=1)
         self._table_frame.columnconfigure(0, weight=1)
         self._table_frame.grid_propagate(False)
@@ -792,7 +896,8 @@ class TwinBirdApp:
             state="disabled",
             wrap="word",
             relief="flat",
-            background="#f6f6f6",
+            background=self._palette["log_bg"],
+            foreground=self._palette["text_fg"],
         )
         logframe.columnconfigure(0, weight=1)
         self.log.grid(row=0, column=0, sticky="ew")
@@ -818,7 +923,16 @@ class TwinBirdApp:
     def _build_help_tab(self, parent: ttk.Frame) -> None:
         container = ttk.Frame(parent, padding=4)
         container.pack(fill="both", expand=True)
-        text = tk.Text(container, wrap="word", padx=10, pady=8, relief="flat")
+        text = tk.Text(
+            container,
+            wrap="word",
+            padx=10,
+            pady=8,
+            relief="flat",
+            background=self._palette["text_bg"],
+            foreground=self._palette["text_fg"],
+        )
+        self._help_text = text
         scroll = ttk.Scrollbar(container, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")

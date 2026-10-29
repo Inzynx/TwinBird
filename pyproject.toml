@@ -34,6 +34,7 @@ dependencies = [
 gui = [
     "pystray>=0.19.5",
     "pillow>=10.0.0",
+    "sv-ttk>=2.6.0",
 ]
 
 [project.scripts]
@@ -68,6 +69,7 @@ dev = [
     # GUI extras so type-checking and the GUI tests run in CI too.
     "pystray>=0.19.5",
     "pillow>=10.0.0",
+    "sv-ttk>=2.6.0",
 ]
 
 [tool.pyright]

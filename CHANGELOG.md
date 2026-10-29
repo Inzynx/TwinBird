@@ -22,6 +22,15 @@ The README now includes copyable startup steps and test status for Windows 11,
 Ubuntu/WSL and macOS. A setup-key GUI connection was confirmed in WSL; macOS is
 source-reviewed and remains untested on a Mac.
 
+### Added
+
+- Modern Sun Valley GUI theme (`sv-ttk`) with a light/dark toggle in the header.
+  The initial theme follows the Windows system setting; the window, tables, logs
+  and help text all adapt to the active theme. Falls back to the previous theme
+  automatically when `sv-ttk` is not installed, so the GUI still works.
+- Decluttered the Instances tab: removed the always-on shortcut hint row (the
+  shortcuts remain on the Help tab) and gave Start the accent button style.
+
 ### Fixed
 
 - Reduced default/minimum GUI sizes to 960 pixels wide / 640 × 460 pixels,

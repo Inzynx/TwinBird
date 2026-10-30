@@ -75,12 +75,31 @@ if (-not (Test-Path '.\dist\netbird-twinbird.exe') -or -not (Test-Path '.\dist\w
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the compatible NetBird client.' }
 }
 $env:TWINBIRD_NETBIRD_BIN = (Resolve-Path '.\dist\netbird-twinbird.exe').Path
+# Put the isolated venv on your user PATH so `twinbird` works in any new shell.
+$tbScripts = Join-Path $tbVenv 'Scripts'
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($userPath -notlike "*$tbScripts*") {
+    [Environment]::SetEnvironmentVariable('Path', "$userPath;$tbScripts", 'User')
+}
+# First launch from this same session (the PATH change needs a new shell to take effect):
 & "$tbVenv\Scripts\twinbird.exe" gui
 ```
 
 The build uses the installed NetBird's `wintun.dll` by default and leaves the
 existing NetBird installation in place. Go and Git are only needed when building
 the compatible client.
+
+The installer puts TwinBird in an isolated virtual environment at
+`%LOCALAPPDATA%\TwinBird\venv`, which is **not** on your `PATH` by default. The
+block above adds its `Scripts` directory to your user `PATH`, so after opening a
+**new** PowerShell the bare commands in the sections below work, for example
+`twinbird gui` or `twinbird status`. The command is `twinbird gui` (a
+subcommand), not `twinbird -gui`. Without the PATH entry, call it by full path:
+`& "$env:LOCALAPPDATA\TwinBird\venv\Scripts\twinbird.exe" gui`. The editable
+checkout finds `dist\netbird-twinbird.exe` automatically, so you do not need to
+set `TWINBIRD_NETBIRD_BIN` again in later shells. On Windows `twinbird gui`
+starts the manager as a detached process and returns your prompt immediately;
+closing the PowerShell window does not stop the GUI.
 
 Why a separate client? Each connection needs its own adapter name **and** internal
 Windows adapter ID. Separate names alone do not avoid the fixed-ID collision in

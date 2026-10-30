@@ -60,58 +60,38 @@ PyPI or the original upstream repository.
 ### Windows 11
 
 Install Python 3.10 or newer, Git, Go 1.25 or newer and NetBird first. Open
-PowerShell **as administrator** in the checkout. Paste the following block; it
-builds the separate compatible client only when its executable or Wintun DLL is
-missing:
+PowerShell **as administrator** in the checkout and run the installer:
 
 ```powershell
-$tbVenv = Join-Path $env:LOCALAPPDATA 'TwinBird\venv'
-python -m venv $tbVenv
-if ($LASTEXITCODE -ne 0) { throw 'Could not create the Python environment.' }
-& "$tbVenv\Scripts\python.exe" -m pip install -e '.[gui]'
-if ($LASTEXITCODE -ne 0) { throw 'Could not install TwinBird.' }
-if (-not (Test-Path '.\dist\netbird-twinbird.exe') -or -not (Test-Path '.\dist\wintun.dll')) {
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\scripts\build-netbird-windows.ps1'
-    if ($LASTEXITCODE -ne 0) { throw 'Could not build the compatible NetBird client.' }
-}
-$env:TWINBIRD_NETBIRD_BIN = (Resolve-Path '.\dist\netbird-twinbird.exe').Path
-# Put the isolated venv on PATH: persist it for new shells and this session.
-$tbScripts = Join-Path $tbVenv 'Scripts'
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$tbScripts*") {
-    [Environment]::SetEnvironmentVariable('Path', "$userPath;$tbScripts", 'User')
-}
-$env:Path = "$env:Path;$tbScripts"
-# Add a Start Menu entry so Windows search finds "TwinBird" (pinning stays manual).
-$icon = & "$tbVenv\Scripts\python.exe" -c "import pathlib,twinbird;a=pathlib.Path(twinbird.__file__).parent/'assets';print(a/'logo-transparent.ico' if (a/'logo-transparent.ico').exists() else a/'logo.ico')"
-$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\TwinBird.lnk'
-$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
-$shortcut.TargetPath = Join-Path $tbVenv 'Scripts\pythonw.exe'
-$shortcut.Arguments = '-m twinbird.cli gui'
-$shortcut.WorkingDirectory = $tbVenv
-$shortcut.IconLocation = $icon
-$shortcut.Description = 'TwinBird - manage multiple NetBird instances'
-$shortcut.Save()
-# `twinbird` now works here and in any new shell:
-twinbird gui
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
 ```
 
-The build uses the installed NetBird's `wintun.dll` by default and leaves the
-existing NetBird installation in place. Go and Git are only needed when building
-the compatible client.
+Add `-Clean` to remove a previous install first, or `-NoLaunch` to skip opening
+the GUI at the end:
 
-The installer puts TwinBird in an isolated virtual environment at
-`%LOCALAPPDATA%\TwinBird\venv`, which is **not** on your `PATH` by default. The
-block above adds its `Scripts` directory to your user `PATH` (persisted) and to
-the current session, so `twinbird` works immediately here and in any new shell,
-for example `twinbird gui` or `twinbird status`. The command is `twinbird gui`
-(a subcommand), not `twinbird -gui`. If a brand-new shell still does not find it,
-call it by full path once: `& "$env:LOCALAPPDATA\TwinBird\venv\Scripts\twinbird.exe" gui`.
-The editable checkout finds `dist\netbird-twinbird.exe` automatically, so you do
-not need to set `TWINBIRD_NETBIRD_BIN` again in later shells. On Windows
-`twinbird gui` launches the manager as a detached, windowless process (via
-`pythonw.exe`) and returns your prompt immediately; closing the PowerShell window
-does not stop the GUI.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -Clean
+```
+
+That single command does everything:
+
+- Creates an isolated virtual environment at `%LOCALAPPDATA%\TwinBird\venv` and
+  installs TwinBird with its GUI dependencies.
+- Builds the separate compatible NetBird client **only** when its executable or
+  Wintun DLL is missing (that step needs Go and Git; it uses the installed
+  NetBird's `wintun.dll` and leaves your NetBird installation in place).
+- Adds the venv's `Scripts` directory to your user `PATH`, so `twinbird` works in
+  any new shell, for example `twinbird gui` or `twinbird status`. The command is
+  `twinbird gui` (a subcommand), not `twinbird -gui`.
+- Creates a **Start Menu** shortcut (`TwinBird`) with the app icon, so Windows
+  search finds the app instead of only the folder. Pin it yourself if you want.
+
+The shortcut and `twinbird gui` launch the manager as a detached, windowless
+process (via `pythonw.exe`), so no console window lingers and closing the
+PowerShell window does not stop the GUI. The shortcut is not elevated; connecting
+an instance needs administrator rights, so use the GUI's **Restart as
+administrator** button (or launch from an elevated shell) when you create
+adapters.
 
 The block also creates a **Start Menu** shortcut (`TwinBird`) with the app icon,
 so you can search for "TwinBird" in the Windows search bar instead of only

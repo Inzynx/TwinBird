@@ -802,13 +802,17 @@ class TwinBirdApp:
         ttk.Label(text, text=APP_SUBTITLE, style="Muted.TLabel").pack(anchor="w")
         ttk.Label(header, text="EXPERIMENTAL", foreground="#8a4b08").pack(side="right")
         if sys.platform == "win32":
-            admin = _is_windows_admin()
-            self._admin_status_label = ttk.Label(
-                header,
-                text=("Administrator" if admin else "Standard user (not elevated)"),
-                foreground=("#1a7f37" if admin else "#8a4b08"),
-            )
-            self._admin_status_label.pack(side="right", padx=(0, 10))
+            elevated = _is_windows_admin()
+            status = "Administrator" if elevated else "Standard user (not elevated)"
+        else:
+            elevated = hasattr(os, "geteuid") and os.geteuid() == 0
+            status = "Root" if elevated else "Not elevated (not root)"
+        self._admin_status_label = ttk.Label(
+            header,
+            text=status,
+            foreground=("#1a7f37" if elevated else "#8a4b08"),
+        )
+        self._admin_status_label.pack(side="right", padx=(0, 10))
         self._btn_theme = ttk.Button(
             header,
             text=self._theme_button_label(),

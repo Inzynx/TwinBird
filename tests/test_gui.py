@@ -79,12 +79,12 @@ class TestGuiModule:
             gui.run_gui()
 
         args, kwargs = popen.call_args
-        assert args[0] == [
-            r"C:\TwinBird\venv\Scripts\pythonw.exe",
-            "-m",
-            "twinbird.cli",
-            "gui",
-        ]
+        # Path parsing of the mocked Windows sys.executable differs between the
+        # host running the test (PosixPath vs WindowsPath), so assert the shape
+        # rather than the exact absolute path.
+        command = args[0]
+        assert command[0].endswith("pythonw.exe")
+        assert command[1:] == ["-m", "twinbird.cli", "gui"]
         assert kwargs["creationflags"] == 0x00000008 | 0x00000200
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["env"]["TWINBIRD_GUI_CHILD"] == "1"

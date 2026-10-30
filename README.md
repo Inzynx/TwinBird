@@ -13,7 +13,7 @@
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platforms">
-  <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange" alt="License: PolyForm Noncommercial 1.0.0">
+  <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-orange" alt="License: FSL-1.1-ALv2">
   <img src="https://img.shields.io/badge/type--checked-pyright-brightgreen" alt="Pyright">
 </p>
 
@@ -691,10 +691,15 @@ See [SECURITY.md](SECURITY.md) for the full security model and boundaries.
 ## License
 
 This project is licensed under the
-[PolyForm Noncommercial License 1.0.0](LICENSE). Any noncommercial use is free.
-Commercial use (selling it, shipping it in a paid product or service, or using it
-to generate revenue) requires a separate written commercial license from the
-copyright holder.
+[Functional Source License, Version 1.1, ALv2 Future License](LICENSE)
+(`FSL-1.1-ALv2`). You may use, modify and redistribute it for any purpose that is
+not a Competing Use, which specifically includes internal use and using it in
+professional services you provide to others. What is not allowed is a Competing
+Use: making it available to others in a commercial product or service that
+substitutes for the Software or offers substantially the same functionality
+(for example, selling it or offering it as a paid product or hosted service).
+Two years after each version is released, that version also becomes available
+under the Apache License, Version 2.0.
 
 It builds on [OseSem/twinbird](https://github.com/OseSem/twinbird), whose original
 portions remain available from that project under the MIT License (preserved here

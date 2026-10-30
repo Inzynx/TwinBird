@@ -688,15 +688,20 @@ class TwinBirdApp:
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                     "TwinBird.Manager"
                 )
-            ico = _ico_path()
-            if ico:
-                with contextlib.suppress(Exception):
-                    self.root.iconbitmap(default=ico)
-                    return
+        # Prefer iconphoto with the transparent PNG: Tk renders the PNG's alpha
+        # correctly, while iconbitmap with our .ico draws the transparent areas
+        # as a black square in the title bar / taskbar on Windows.
         icon = self._photo_image()
         if icon is not None:
             with contextlib.suppress(Exception):
                 self.root.iconphoto(True, icon)
+                return
+        # Fallback to the multi-size .ico only if the PNG could not be loaded.
+        if sys.platform == "win32":
+            ico = _ico_path()
+            if ico:
+                with contextlib.suppress(Exception):
+                    self.root.iconbitmap(default=ico)
 
     # -- UI construction --------------------------------------------------- #
 

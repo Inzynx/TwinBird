@@ -82,6 +82,16 @@ if ($userPath -notlike "*$tbScripts*") {
     [Environment]::SetEnvironmentVariable('Path', "$userPath;$tbScripts", 'User')
 }
 $env:Path = "$env:Path;$tbScripts"
+# Add a Start Menu entry so Windows search finds "TwinBird" (pinning stays manual).
+$icon = & "$tbVenv\Scripts\python.exe" -c "import pathlib,twinbird;a=pathlib.Path(twinbird.__file__).parent/'assets';print(a/'logo-transparent.ico' if (a/'logo-transparent.ico').exists() else a/'logo.ico')"
+$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\TwinBird.lnk'
+$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+$shortcut.TargetPath = Join-Path $tbVenv 'Scripts\pythonw.exe'
+$shortcut.Arguments = '-m twinbird.cli gui'
+$shortcut.WorkingDirectory = $tbVenv
+$shortcut.IconLocation = $icon
+$shortcut.Description = 'TwinBird - manage multiple NetBird instances'
+$shortcut.Save()
 # `twinbird` now works here and in any new shell:
 twinbird gui
 ```
@@ -102,6 +112,14 @@ not need to set `TWINBIRD_NETBIRD_BIN` again in later shells. On Windows
 `twinbird gui` launches the manager as a detached, windowless process (via
 `pythonw.exe`) and returns your prompt immediately; closing the PowerShell window
 does not stop the GUI.
+
+The block also creates a **Start Menu** shortcut (`TwinBird`) with the app icon,
+so you can search for "TwinBird" in the Windows search bar instead of only
+finding the folder. It launches through `pythonw.exe`, so no console window
+appears. Pin it to the taskbar or Start yourself if you want. The shortcut is
+not elevated; connecting an instance needs administrator rights, so use the
+GUI's **Restart as administrator** button (or launch from an elevated shell)
+when you actually create adapters.
 
 Why a separate client? Each connection needs its own adapter name **and** internal
 Windows adapter ID. Separate names alone do not avoid the fixed-ID collision in

@@ -1527,8 +1527,15 @@ class TwinBirdApp:
 def run_gui() -> None:
     if sys.platform == "win32" and os.environ.get("TWINBIRD_GUI_CHILD") != "1":
         # Start a separate GUI process so the shell prompt returns immediately.
+        # Prefer pythonw.exe: it is a GUI-subsystem binary, so the detached
+        # child gets no console. Launching the console-subsystem twinbird.exe
+        # here makes Windows allocate a stray console window that the GUI is
+        # then tied to (closing it would kill TwinBird).
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
         launcher = sys.argv[0]
-        if Path(launcher).suffix.casefold() == ".exe":
+        if pythonw.is_file():
+            command = [str(pythonw), "-m", "twinbird.cli", "gui"]
+        elif Path(launcher).suffix.casefold() == ".exe":
             command = [launcher, *sys.argv[1:]]
         else:
             command = [sys.executable, "-m", "twinbird.cli", "gui"]

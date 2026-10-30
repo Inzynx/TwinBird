@@ -62,16 +62,29 @@ class TestGuiModule:
 
         from twinbird import gui
 
+        # pythonw.exe is GUI-subsystem, so the detached child gets no console
+        # window. Launching the console-subsystem twinbird.exe would make
+        # Windows allocate a stray console the GUI is then tied to.
         with (
             patch("twinbird.gui.sys.platform", "win32"),
+            patch(
+                "twinbird.gui.sys.executable",
+                r"C:\TwinBird\venv\Scripts\python.exe",
+            ),
             patch("twinbird.gui.sys.argv", [r"C:\TwinBird\twinbird.exe", "gui"]),
+            patch("twinbird.gui.Path.is_file", return_value=True),
             patch.dict(os.environ, {}, clear=True),
             patch("twinbird.gui.subprocess.Popen") as popen,
         ):
             gui.run_gui()
 
         args, kwargs = popen.call_args
-        assert args[0] == [r"C:\TwinBird\twinbird.exe", "gui"]
+        assert args[0] == [
+            r"C:\TwinBird\venv\Scripts\pythonw.exe",
+            "-m",
+            "twinbird.cli",
+            "gui",
+        ]
         assert kwargs["creationflags"] == 0x00000008 | 0x00000200
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["env"]["TWINBIRD_GUI_CHILD"] == "1"

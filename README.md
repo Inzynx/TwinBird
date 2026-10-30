@@ -89,17 +89,20 @@ That single command does everything:
 The shortcut and `twinbird gui` launch the manager as a detached, windowless
 process (via `pythonw.exe`), so no console window lingers and closing the
 PowerShell window does not stop the GUI. The shortcut is not elevated; connecting
-an instance needs administrator rights, so use the GUI's **Restart as
-administrator** button (or launch from an elevated shell) when you create
-adapters.
+an instance needs administrator rights. The GUI header shows whether it is
+running as **Administrator** or as a **Standard user (not elevated)**, and when
+not elevated it offers a **Restart as administrator** button (you can also just
+launch from an elevated shell) for when you create adapters.
 
-The block also creates a **Start Menu** shortcut (`TwinBird`) with the app icon,
-so you can search for "TwinBird" in the Windows search bar instead of only
-finding the folder. It launches through `pythonw.exe`, so no console window
-appears. Pin it to the taskbar or Start yourself if you want. The shortcut is
-not elevated; connecting an instance needs administrator rights, so use the
-GUI's **Restart as administrator** button (or launch from an elevated shell)
-when you actually create adapters.
+To uninstall, run the uninstaller from the checkout. It removes the venv, the
+Start Menu shortcut and the PATH entry, and leaves your NetBird installation
+untouched. Remove your instances from the GUI first so their autostart entries
+and adapters are cleaned up. Add `-Purge` to also delete the config/state
+directory (`%APPDATA%\twinbird`), which discards saved instances:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
+```
 
 Why a separate client? Each connection needs its own adapter name **and** internal
 Windows adapter ID. Separate names alone do not avoid the fixed-ID collision in

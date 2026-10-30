@@ -94,6 +94,17 @@ class TestGuiModule:
 
         assert isinstance(gui._tray_available(), bool)
 
+    def test_is_windows_admin_returns_bool(self) -> None:
+        import twinbird.gui as gui
+
+        assert isinstance(gui._is_windows_admin(), bool)
+
+    def test_is_windows_admin_true_off_windows(self) -> None:
+        from twinbird import gui
+
+        with patch("twinbird.gui.sys.platform", "linux"):
+            assert gui._is_windows_admin() is True
+
     def test_wsl_uses_window_without_tray(self) -> None:
         from twinbird import gui
 

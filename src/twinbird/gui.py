@@ -108,14 +108,48 @@ def _is_wsl() -> bool:
 
 
 def _is_windows_admin() -> bool:
-    """Return whether this process has an elevated Windows administrator token."""
+    """Return whether this process runs with an elevated administrator token.
+
+    Queries the process token's elevation flag (``TokenElevation``), which is
+    the authoritative check, and falls back to the legacy ``shell32`` API only
+    if that query fails for some reason.
+    """
     if sys.platform != "win32":
         return True
     try:
         import ctypes
+        from ctypes import wintypes
 
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        token_query = 0x0008
+        token_elevation = 20  # TOKEN_INFORMATION_CLASS.TokenElevation
+
+        kernel32 = ctypes.windll.kernel32
+        advapi32 = ctypes.windll.advapi32
+
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            elevated = wintypes.DWORD()
+            returned = wintypes.DWORD()
+            if not advapi32.GetTokenInformation(
+                token,
+                token_elevation,
+                ctypes.byref(elevated),
+                ctypes.sizeof(elevated),
+                ctypes.byref(returned),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return elevated.value != 0
+        finally:
+            kernel32.CloseHandle(token)
     except Exception:
+        with contextlib.suppress(Exception):
+            import ctypes
+
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
         return False
 
 
@@ -762,6 +796,14 @@ class TwinBirdApp:
         ttk.Label(text, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
         ttk.Label(text, text=APP_SUBTITLE, style="Muted.TLabel").pack(anchor="w")
         ttk.Label(header, text="EXPERIMENTAL", foreground="#8a4b08").pack(side="right")
+        if sys.platform == "win32":
+            admin = _is_windows_admin()
+            self._admin_status_label = ttk.Label(
+                header,
+                text=("Administrator" if admin else "Standard user (not elevated)"),
+                foreground=("#1a7f37" if admin else "#8a4b08"),
+            )
+            self._admin_status_label.pack(side="right", padx=(0, 10))
         self._btn_theme = ttk.Button(
             header,
             text=self._theme_button_label(),

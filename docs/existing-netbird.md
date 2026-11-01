@@ -1,8 +1,21 @@
 # Using an existing NetBird install
 
-TwinBird does not change the existing NetBird installation or its configuration.
-If you choose Start or Stop on an adopted instance, that command does affect its
-existing connection; the GUI asks for confirmation first.
+TwinBird does not replace the existing NetBird installation. Start, Stop and
+profile switching affect its existing service; the GUI asks for confirmation.
+
+## Original NetBird profiles
+
+The adopted row displays the active original NetBird profile. Select that row
+and choose **Switch NetBird profile...** to list and switch its profiles. One
+original profile can be active at a time; switching briefly disconnects the
+original service and also changes the selection in the NetBird app. TwinBird
+reconnects it if it was connected beforehand. Other TwinBird instances have
+separate identities, but shared routes and DNS may still overlap.
+
+**Rename** sets a TwinBird-only alias for the selected profile. The original
+name is shown in parentheses, for example `Work (default)`; NetBird's profile
+name and identity do not change. Windows switching has been tested; Linux and
+macOS switching still require live validation.
 
 - **Integrate it (no re-adding).** Click **Scan for existing** in the GUI (or run
   `twinbird import`) to adopt your current NetBird as an instance. TwinBird points

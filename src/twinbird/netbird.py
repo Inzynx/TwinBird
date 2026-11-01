@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +53,70 @@ def find_netbird_bin() -> str:
         msg = "netbird not found on PATH. Install NetBird or set TWINBIRD_NETBIRD_BIN."
         raise FileNotFoundError(msg)
     return bin_path
+
+
+def find_primary_netbird_bin() -> str:
+    """Locate the installed client used to control the original service."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Services\Netbird",
+            ) as key:
+                image, _ = winreg.QueryValueEx(key, "ImagePath")
+            image = os.path.expandvars(image).strip()
+            if image.startswith('"'):
+                executable = image.split('"')[1]
+            else:
+                match = re.match(r"^(.*?\.exe)(?:\s|$)", image, re.IGNORECASE)
+                executable = match.group(1) if match else ""
+            if executable and Path(executable).is_file():
+                return executable
+        except (ImportError, OSError, IndexError, TypeError):
+            pass
+        installed = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+        installed = installed / "Netbird" / "netbird.exe"
+        if installed.is_file():
+            return str(installed)
+    found = shutil.which("netbird")
+    if not found:
+        raise FileNotFoundError("The original NetBird client could not be found.")
+    return found
+
+
+def primary_profile_command(
+    daemon_addr: str, *args: str, timeout: int = 15
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [find_primary_netbird_bin(), *args, "--daemon-addr", daemon_addr],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=timeout,
+        creationflags=hidden_process_flags(),
+    )
+
+
+def primary_profiles(daemon_addr: str) -> list[tuple[str, bool]]:
+    result = primary_profile_command(daemon_addr, "profile", "list")
+    if result.returncode:
+        raise RuntimeError(
+            (result.stderr or result.stdout).strip() or "Profile list failed."
+        )
+    profiles = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith(("✓ ", "✗ ")):
+            profiles.append((line[2:].strip(), line.startswith("✓")))
+        elif line and not line.startswith("Found "):
+            raise RuntimeError("Unrecognized NetBird profile-list output.")
+    if not profiles or sum(active for _, active in profiles) != 1:
+        raise RuntimeError("Cannot identify the active NetBird profile safely.")
+    return profiles
 
 
 def run_version(netbird_bin: str) -> subprocess.CompletedProcess[str]:
@@ -181,6 +247,46 @@ def run_up(
     # Isolated instances target their own daemon's data dir; an adopted primary
     # must use the real NetBird data dir, so isolate=False there.
     env = managed_child_env(config_dir) if isolate else None
+    if env is not None:
+        # NetBird 0.64's CLI reads its profile selection separately from the
+        # daemon, via os.UserConfigDir()/netbird/active_profile.txt. Without
+        # this per-instance directory, a profile selected in the stock app is
+        # sent to our daemon, even though it only has its own default profile.
+        # Leave the adopted primary's real user profile completely untouched.
+        cli_root = (config_dir / "cli-profile").resolve()
+        if sys.platform == "win32" or sys.platform.startswith("linux"):
+            # Do not silently switch an existing managed daemon away from a
+            # non-default profile: that could select a different identity.
+            active = managed_netbird_home(config_dir) / "active_profile.json"
+            if active.exists():
+                try:
+                    state = json.loads(active.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise RuntimeError(
+                        f"Cannot read managed NetBird profile state: {active}"
+                    ) from exc
+                if not isinstance(state, dict) or state.get("name") not in (
+                    None,
+                    "",
+                    "default",
+                ):
+                    raise RuntimeError(
+                        "This managed instance uses a non-default NetBird profile. "
+                        "TwinBird will not switch its identity automatically."
+                    )
+            cli_profile = cli_root / "netbird" / "active_profile.txt"
+            if cli_profile.exists() and cli_profile.read_text(
+                encoding="utf-8"
+            ).strip() not in ("", "default"):
+                raise RuntimeError(
+                    "This instance's isolated NetBird CLI profile is not default. "
+                    "TwinBird will not switch its identity automatically."
+                )
+        cli_config = str(cli_root)
+        if sys.platform == "win32":
+            env["APPDATA"] = cli_config
+        elif sys.platform.startswith("linux"):
+            env["XDG_CONFIG_HOME"] = cli_config
 
     if setup_key:
         # Pass the key via a file, never on the command line: process command

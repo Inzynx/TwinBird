@@ -44,6 +44,8 @@ from twinbird.netbird import (
     OperationCancelled,
     find_netbird_bin,
     managed_log_file,
+    primary_profile_command,
+    primary_profiles,
     run_down,
     run_status,
     run_up,
@@ -94,9 +96,14 @@ class InstanceStatus:
     management_connected: bool | None = None
     display_name: str | None = None
     wireguard_port: int | None = None
+    active_profile: str | None = None
 
     @property
     def label(self) -> str:
+        if self.managed_externally and self.active_profile:
+            if self.display_name and self.display_name != self.active_profile:
+                return f"{self.display_name} ({self.active_profile})"
+            return self.active_profile
         return self.display_name or self.name
 
     @property
@@ -354,6 +361,9 @@ def start(
         raise ManagerError(
             "Connection attempt cancelled. The temporary daemon was stopped."
         ) from exc
+    except (RuntimeError, OSError) as exc:
+        stop_daemon(platform.config_root, name, netbird_bin)
+        raise ManagerError(str(exc)) from exc
     if getattr(result, "stdout", None):
         emit(result.stdout.rstrip())
     detail = ""
@@ -505,7 +515,9 @@ def set_autostart(name: str, enabled: bool, *, emit: Emit = _noop) -> None:
     write_metadata(platform.config_root, metadata)
 
 
-def rename(name: str, label: str, *, emit: Emit = _noop) -> None:
+def rename(
+    name: str, label: str, *, profile_name: str | None = None, emit: Emit = _noop
+) -> None:
     """Change the local label without moving identity files or service paths."""
     _require_valid(name)
     label = label.strip()
@@ -515,6 +527,19 @@ def rename(name: str, label: str, *, emit: Emit = _noop) -> None:
     metadata = read_metadata(platform.config_root, name)
     if metadata is None:
         raise ManagerError(f"Instance '{name}' not found.")
+    if profile_name is not None:
+        if not metadata.managed_externally:
+            raise ManagerError("Profile aliases are only for the existing NetBird.")
+        profiles = get_primary_profiles(name)
+        if profile_name not in [p[0] for p in profiles]:
+            raise ManagerError("This NetBird profile no longer exists; refresh first.")
+        if label == profile_name:
+            metadata.profile_aliases.pop(profile_name, None)
+        else:
+            metadata.profile_aliases[profile_name] = label
+        write_metadata(platform.config_root, metadata)
+        emit(f"TwinBird label for '{profile_name}' is now '{label}'.")
+        return
     for other in list_instances(platform.config_root):
         if other == name:
             continue
@@ -528,6 +553,77 @@ def rename(name: str, label: str, *, emit: Emit = _noop) -> None:
     metadata.display_name = label if label != name else None
     write_metadata(platform.config_root, metadata)
     emit(f"Renamed '{old_label}' to '{label}'.")
+
+
+def get_primary_profiles(name: str) -> list[tuple[str, bool]]:
+    _require_valid(name)
+    metadata = read_metadata(get_platform_config().config_root, name)
+    if not metadata or not metadata.managed_externally:
+        raise ManagerError("Select your existing NetBird service first.")
+    try:
+        return primary_profiles(metadata.daemon_addr)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        raise ManagerError(f"Could not read NetBird profiles: {exc}") from exc
+
+
+def switch_primary_profile(name: str, profile: str, *, emit: Emit = _noop) -> None:
+    """Switch the real service and reconnect if it was connected beforehand."""
+    profiles = get_primary_profiles(name)
+    if profile not in [p[0] for p in profiles]:
+        raise ManagerError("NetBird profile no longer exists; refresh the list.")
+    original = next(p[0] for p in profiles if p[1])
+    if profile == original:
+        emit(f"NetBird profile '{profile}' is already active.")
+        return
+    metadata = read_metadata(get_platform_config().config_root, name)
+    if not metadata:
+        raise ManagerError("Existing NetBird metadata is unavailable.")
+    try:
+        status = run_status(find_netbird_bin(), metadata.daemon_addr, json_output=True)
+        data = json.loads(status.stdout)
+        connected = data.get("management", {}).get("connected")
+        if status.returncode or not isinstance(connected, bool):
+            raise ValueError("Management status unavailable")
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired) as exc:
+        raise ManagerError(
+            f"Cannot establish existing connection state: {exc}"
+        ) from exc
+
+    def command(*args: str, timeout: int = 15) -> None:
+        result = primary_profile_command(metadata.daemon_addr, *args, timeout=timeout)
+        if result.returncode:
+            raise RuntimeError(
+                (result.stderr or result.stdout).strip() or "Command failed"
+            )
+
+    emit(f"Switching original NetBird from '{original}' to '{profile}'...")
+    try:
+        # NetBird 0.64's profile-select command uses a seven-second context for
+        # an implicit Down RPC. Disconnect separately with a longer timeout so
+        # slow Windows interface teardown doesn't abort the profile change.
+        if connected:
+            command("down", timeout=45)
+        command("profile", "select", profile)
+        if connected:
+            command("up", timeout=45)
+        if not any(p == profile and active for p, active in get_primary_profiles(name)):
+            raise RuntimeError(
+                "NetBird did not report the requested profile as active."
+            )
+    except (OSError, RuntimeError, ManagerError, subprocess.TimeoutExpired) as exc:
+        try:
+            command("profile", "select", original)
+            if connected:
+                command("up", timeout=45)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as recovery:
+            raise ManagerError(
+                f"Profile switch failed: {exc}. "
+                f"Restore '{original}' in NetBird: {recovery}"
+            ) from exc
+        raise ManagerError(
+            f"Profile switch failed; restored '{original}': {exc}"
+        ) from exc
+    emit(f"NetBird profile '{profile}' selected. Check peer connectivity separately.")
 
 
 def remove(name: str, *, emit: Emit = _noop) -> None:
@@ -608,6 +704,17 @@ def get_status(name: str) -> InstanceStatus | None:
     netbird_ip = None
     peer_name = None
     management_connected = None
+    active_profile = None
+    if external and reachable:
+        with contextlib.suppress(OSError, RuntimeError, subprocess.TimeoutExpired):
+            active_profile = next(
+                (
+                    name
+                    for name, active in primary_profiles(metadata.daemon_addr)
+                    if active
+                ),
+                None,
+            )
     if (running or reachable) and metadata.daemon_addr:
         with contextlib.suppress(Exception):
             status_result = run_status(
@@ -641,8 +748,13 @@ def get_status(name: str) -> InstanceStatus | None:
         netbird_ip=netbird_ip,
         peer_name=peer_name,
         management_connected=management_connected,
-        display_name=metadata.display_name,
+        display_name=(
+            metadata.profile_aliases.get(active_profile) or metadata.display_name
+            if active_profile
+            else metadata.display_name
+        ),
         wireguard_port=metadata.wireguard_port,
+        active_profile=active_profile,
     )
 
 

@@ -47,6 +47,10 @@ the window without a system-tray icon.*
   - **Enable / Disable autostart** - reconnect automatically after you sign in.
   - **Remove** - disconnect and delete a TwinBird-managed instance's local
     settings and autostart. The adopted primary is protected and cannot be removed.
+- Select the original NetBird row and click **Switch NetBird profile...** to
+  select another profile in the original client. The original connection briefly
+  disconnects and the selected profile also changes in the NetBird app. Local
+  aliases show the original profile name in parentheses.
 - **Scan for existing** finds the NetBird already installed on this PC and adds it
   to the list as an adopted instance (read-only toward the primary - see below).
 - **Add instance** and **Refresh** are available when no action is running.

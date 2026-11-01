@@ -73,6 +73,23 @@ class TestStartValidation:
 
 
 class TestMultipleInstances:
+    def test_profile_error_stops_temporary_daemon(self, tmp_path: Path) -> None:
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch("twinbird.manager.find_netbird_bin", return_value="custom.exe"),
+            patch("twinbird.manager._interfaces_in_use", return_value=set()),
+            patch("twinbird.manager._wg_ports_in_use", return_value=set()),
+            patch("twinbird.manager.read_pid", return_value=None),
+            patch("twinbird.manager.start_daemon", return_value=123),
+            patch("twinbird.manager.stop_daemon") as stop,
+            patch("twinbird.manager.run_up", side_effect=RuntimeError("profile issue")),
+            pytest.raises(ManagerError, match="profile issue"),
+        ):
+            manager.start("office", "https://mgmt.example.com", setup_key="K")
+        stop.assert_called_once_with(tmp_path, "office", "custom.exe")
+
     def test_four_instances_get_distinct_resources(self, tmp_path: Path) -> None:
         platform = _platform(tmp_path)
         pids = iter(range(100, 200))
@@ -146,6 +163,84 @@ class TestRename:
         start.assert_not_called()
         stop.assert_not_called()
         register.assert_not_called()
+
+    def test_primary_profile_alias_preserves_original_name(
+        self, tmp_path: Path
+    ) -> None:
+        self._create(tmp_path, "primary", external=True)
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch(
+                "twinbird.manager.get_primary_profiles",
+                return_value=[("default", True)],
+            ),
+        ):
+            manager.rename("primary", "default1", profile_name="default")
+        metadata = read_metadata(tmp_path, "primary")
+        assert metadata is not None
+        assert metadata.profile_aliases == {"default": "default1"}
+        status = manager.InstanceStatus(
+            "primary",
+            False,
+            True,
+            True,
+            None,
+            "wt0",
+            None,
+            "addr",
+            managed_externally=True,
+            active_profile="default",
+            display_name="default1",
+        )
+        assert status.label == "default1 (default)"
+
+    def test_failed_reconnect_restores_original_profile(self, tmp_path: Path) -> None:
+        ensure_instance_dir(tmp_path, "primary")
+        write_metadata(
+            tmp_path,
+            InstanceMetadata(
+                "primary",
+                "https://example.com",
+                "tcp://127.0.0.1:41731",
+                "wt0",
+                0,
+                "t",
+                managed_externally=True,
+            ),
+        )
+        success = MagicMock(returncode=0, stdout="ok", stderr="")
+        failure = MagicMock(returncode=1, stdout="", stderr="reconnect failed")
+        with (
+            patch(
+                "twinbird.manager.get_platform_config", return_value=_platform(tmp_path)
+            ),
+            patch(
+                "twinbird.manager.get_primary_profiles",
+                return_value=[("default", False), ("home", True)],
+            ),
+            patch("twinbird.manager.find_netbird_bin", return_value="netbird"),
+            patch(
+                "twinbird.manager.run_status",
+                return_value=MagicMock(
+                    returncode=0, stdout='{"management":{"connected":true}}'
+                ),
+            ),
+            patch(
+                "twinbird.manager.primary_profile_command",
+                side_effect=[success, success, failure, success, success],
+            ) as command,
+            pytest.raises(ManagerError, match="restored 'home'"),
+        ):
+            manager.switch_primary_profile("primary", "default")
+        assert [call.args[1:] for call in command.call_args_list] == [
+            ("down",),
+            ("profile", "select", "default"),
+            ("up",),
+            ("profile", "select", "home"),
+            ("up",),
+        ]
 
     @pytest.mark.parametrize("label", ["", " ", "x" * 65, "invalid\nname"])
     def test_rejects_invalid_labels(self, tmp_path: Path, label: str) -> None:

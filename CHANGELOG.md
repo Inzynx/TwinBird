@@ -24,6 +24,11 @@ source-reviewed and remains untested on a Mac.
 
 ### Added
 
+- Show the active original NetBird profile in place of the generic primary label.
+  A Profiles dialog switches the original service's profile; local aliases keep
+  the actual profile name visible in parentheses. Profile selection affects the
+  NetBird app and one original profile remains active at a time. Windows live
+  testing switched between two profiles and restored the original selection.
 - Modern Sun Valley GUI theme (`sv-ttk`) with a light/dark toggle in the header.
   The initial theme follows the Windows system setting; the window, tables, logs
   and help text all adapt to the active theme. Falls back to the previous theme

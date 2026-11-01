@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from twinbird.netbird import find_netbird_bin
 
 
@@ -78,6 +80,80 @@ class TestFindNetbirdBin:
 
 
 class TestRunUp:
+    def test_refuses_to_switch_existing_managed_profile(self, tmp_path):
+        from twinbird.netbird import run_up
+
+        home = tmp_path / "Netbird"
+        home.mkdir()
+        state = home / "active_profile.json"
+        state.write_text('{"name":"Important","username":"user"}')
+        with (
+            patch("twinbird.netbird.sys.platform", "win32"),
+            patch("twinbird.netbird.subprocess.run") as run,
+            pytest.raises(RuntimeError, match="non-default"),
+        ):
+            run_up("netbird", "tcp://127.0.0.1:42001", "https://example.com", tmp_path)
+        run.assert_not_called()
+        assert '"Important"' in state.read_text()
+
+    def test_managed_windows_cli_profile_is_per_instance(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from twinbird.netbird import run_up
+
+        original_appdata = str(tmp_path / "real-roaming")
+        with (
+            patch("twinbird.netbird.sys.platform", "win32"),
+            patch.dict("os.environ", {"APPDATA": original_appdata}),
+            patch(
+                "twinbird.netbird.subprocess.run",
+                return_value=MagicMock(returncode=0),
+            ) as run,
+        ):
+            run_up("netbird", "tcp://127.0.0.1:42001", "https://example.com", tmp_path)
+
+        assert run.call_args.kwargs["env"]["APPDATA"] == str(
+            (tmp_path / "cli-profile").resolve()
+        )
+        assert original_appdata != run.call_args.kwargs["env"]["APPDATA"]
+
+    def test_managed_linux_cli_profile_is_per_instance(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from twinbird.netbird import run_up
+
+        with (
+            patch("twinbird.netbird.sys.platform", "linux"),
+            patch.dict("os.environ", {"XDG_CONFIG_HOME": "/real/config"}),
+            patch(
+                "twinbird.netbird.subprocess.run",
+                return_value=MagicMock(returncode=0),
+            ) as run,
+        ):
+            run_up("netbird", "unix:///tmp/test.sock", "https://example.com", tmp_path)
+
+        assert run.call_args.kwargs["env"]["XDG_CONFIG_HOME"] == str(
+            (tmp_path / "cli-profile").resolve()
+        )
+
+    def test_existing_primary_keeps_real_user_profile(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from twinbird.netbird import run_up
+
+        with patch(
+            "twinbird.netbird.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ) as run:
+            run_up(
+                "netbird",
+                "tcp://127.0.0.1:41731",
+                "https://example.com",
+                tmp_path,
+                isolate=False,
+            )
+        assert run.call_args.kwargs["env"] is None
+
     def test_setup_key_passed_as_file_not_argv(self, tmp_path):
         from unittest.mock import MagicMock
 

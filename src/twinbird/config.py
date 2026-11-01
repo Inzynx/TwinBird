@@ -4,7 +4,7 @@ import contextlib
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 # Owner-only permissions for config dirs and secret-bearing files on POSIX.
@@ -54,6 +54,8 @@ class InstanceMetadata:
     managed_externally: bool = False
     # A user-facing label; `name` remains the stable directory/service identity.
     display_name: str | None = None
+    # Local aliases only; NetBird's actual profile names and files are untouched.
+    profile_aliases: dict[str, str] = field(default_factory=dict)
 
 
 def instance_dir(config_root: Path, name: str) -> Path:

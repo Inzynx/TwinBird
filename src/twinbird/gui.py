@@ -418,11 +418,22 @@ _HELP_SECTIONS: list[tuple[str, str]] = [
     (
         "Using your existing NetBird",
         "If you already run NetBird on this PC, you do not need to change anything. "
-        "TwinBird only reads your existing configuration (never edits it) to "
-        "pre-fill the correct server URL, and it keeps new instances off your "
+        "TwinBird reads your existing configuration to pre-fill the server URL, "
+        "and keeps new instances off your "
         "existing network adapter and WireGuard port so the current connection "
         "stays stable. Each instance is still a separate NetBird peer, so it needs "
         "its own login or setup key (a NetBird requirement, not a TwinBird one).",
+    ),
+    (
+        "Original NetBird profiles",
+        "Select the existing NetBird row and click Profiles to switch between "
+        "profiles on the original service. Only one such profile is active at a "
+        "time; switching briefly disconnects it and also changes the selection "
+        "in the NetBird app. If it was connected, TwinBird asks NetBird to "
+        "reconnect; otherwise it stays disconnected. A TwinBird-managed instance "
+        "has a separate identity. Rename sets a local label only, with the "
+        "original profile name shown in parentheses. Profiles and connections "
+        "share Windows routing and DNS, and overlapping networks can conflict.",
     ),
     (
         "Start, stop and autostart",
@@ -882,6 +893,22 @@ class TwinBirdApp:
         )
         self._btn_cancel.pack(side="right", padx=(6, 0))
 
+        profiles_row = ttk.Frame(root, padding=(0, 0, 0, 6))
+        profiles_row.pack(fill="x")
+        self._btn_profiles = ttk.Button(
+            profiles_row,
+            text="Switch NetBird profile...",
+            command=self._on_profiles,
+            state="disabled",
+        )
+        self._btn_profiles.pack(side="left", padx=(0, 8))
+        self._profile_hint = tk.StringVar(
+            value="Select your existing NetBird connection to switch its profile."
+        )
+        ttk.Label(profiles_row, textvariable=self._profile_hint).pack(
+            side="left", fill="x", expand=True
+        )
+
         body = ttk.Frame(root)
         self._body = body
 
@@ -1091,6 +1118,7 @@ class TwinBirdApp:
             self._btn_scan,
             self._btn_remove,
             self._btn_rename,
+            self._btn_profiles,
             self._btn_cancel,
             self._btn_refresh,
         ):
@@ -1216,10 +1244,22 @@ class TwinBirdApp:
                 self._btn_rename,
             ):
                 b.configure(state="disabled")
+            if hasattr(self, "_btn_profiles"):
+                self._btn_profiles.configure(state="disabled")
+                self._profile_hint.set("Select your existing NetBird connection.")
             return
         self._btn_start.configure(state="normal" if st.can_start else "disabled")
         self._btn_stop.configure(state="normal" if st.can_stop else "disabled")
         self._btn_rename.configure(state="normal")
+        if hasattr(self, "_btn_profiles"):
+            self._btn_profiles.configure(
+                state="normal" if st.managed_externally and st.reachable else "disabled"
+            )
+            self._profile_hint.set(
+                f"Original NetBird profile: {st.active_profile or 'unknown'}"
+                if st.managed_externally
+                else "Select your existing NetBird connection to switch its profile."
+            )
         self._btn_remove.configure(
             state="disabled" if st.managed_externally else "normal"
         )
@@ -1268,13 +1308,16 @@ class TwinBirdApp:
         daemon = "Reachable / running" if st.up else "Not running"
         return (
             f"{st.label}  |  {ownership}  |  Instance ID: {st.name}\n"
-            f"Server: {st.management_url or 'Unknown'}\n"
-            f"Adapter: {st.interface_name or 'Unknown'}  |  "
-            f"IP: {st.netbird_ip or 'Not available'}  |  "
-            f"Peer: {st.peer_name or 'Not available'}\n"
-            f"Daemon: {daemon}  |  Control: {st.daemon_addr or 'Unknown'}  |  "
-            f"WireGuard port: {st.wireguard_port or 'Unknown'}  |  "
-            f"PID: {st.pid or 'Service-managed / unavailable'}"
+            + (f"NetBird profile: {st.active_profile}\n" if st.active_profile else "")
+            + (
+                f"Server: {st.management_url or 'Unknown'}\n"
+                f"Adapter: {st.interface_name or 'Unknown'}  |  "
+                f"IP: {st.netbird_ip or 'Not available'}  |  "
+                f"Peer: {st.peer_name or 'Not available'}\n"
+                f"Daemon: {daemon}  |  Control: {st.daemon_addr or 'Unknown'}  |  "
+                f"WireGuard port: {st.wireguard_port or 'Unknown'}  |  "
+                f"PID: {st.pid or 'Service-managed / unavailable'}"
+            )
         )
 
     def _update_details(self) -> None:
@@ -1349,12 +1392,107 @@ class TwinBirdApp:
         label = simpledialog.askstring(
             "Rename instance",
             "Local display name (1-64 characters).\n"
-            "This changes the name in TwinBird; the NetBird peer name stays the same.",
-            initialvalue=st.label,
+            "The original NetBird profile and peer names stay unchanged. "
+            "The original profile name is shown in parentheses.",
+            initialvalue=st.display_name or st.active_profile or st.label,
             parent=self.root,
         )
-        if label is not None and label.strip() != st.label:
-            self._run_async(lambda: manager.rename(st.name, label, emit=self._log))
+        if label is not None and label.strip() != (
+            st.display_name or st.active_profile or st.label
+        ):
+            self._run_async(
+                lambda: manager.rename(
+                    st.name, label, profile_name=st.active_profile, emit=self._log
+                )
+            )
+
+    def _on_profiles(self) -> None:
+        if self._busy or self._refreshing:
+            return
+        name = self._selected_name()
+        st = self._status_by_name.get(name) if name else None
+        if not st or not st.managed_externally:
+            return
+
+        self._busy = True
+        self._set_all_buttons("disabled")
+
+        def load() -> None:
+            try:
+                profiles = manager.get_primary_profiles(st.name)
+            except Exception as exc:
+                self._log(f"Error: {exc}")
+                profiles = None
+
+            def finish() -> None:
+                self._busy = False
+                self._update_buttons()
+                if profiles is not None:
+                    self._show_profiles(st.name, profiles)
+
+            self._post(finish)
+
+        threading.Thread(target=load, daemon=True).start()
+
+    def _show_profiles(self, name: str, profiles: list[tuple[str, bool]]) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Original NetBird profiles")
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        body = ttk.Frame(dialog, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body,
+            text=(
+                "These profiles share the original NetBird service. Only one "
+                "can be active at a time. Switching briefly disconnects it "
+                "and changes the selection in the NetBird app. Other "
+                "TwinBird instances are separate. A connected service is "
+                "reconnected; a disconnected service stays disconnected. "
+                "Overlapping networks can affect routing."
+            ),
+            wraplength=430,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+        active = next(profile for profile, selected in profiles if selected)
+        selection = tk.StringVar(value=active)
+        choice = ttk.Combobox(
+            body,
+            textvariable=selection,
+            values=[p for p, _ in profiles],
+            state="readonly",
+            width=38,
+        )
+        choice.pack(fill="x", pady=(0, 10))
+        ttk.Label(body, text=f"Currently active: {active}").pack(anchor="w")
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(12, 0))
+        result: list[str] = []
+
+        def choose() -> None:
+            result.append(selection.get())
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Switch", command=choose).pack(side="left")
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right")
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.grab_set()
+        choice.focus_set()
+        self.root.wait_window(dialog)
+        if (
+            result
+            and result[0] != active
+            and messagebox.askyesno(
+                "Switch original NetBird profile?",
+                f"Switch from '{active}' to '{result[0]}'? The current original "
+                "NetBird connection will briefly disconnect. This also changes "
+                "the profile selected in the NetBird app.",
+                parent=self.root,
+            )
+        ):
+            self._run_async(
+                lambda: manager.switch_primary_profile(name, result[0], emit=self._log)
+            )
 
     def _on_row_double_click(self, _event: Any) -> None:
         if self._busy or self._refreshing:
